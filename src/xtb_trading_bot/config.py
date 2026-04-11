@@ -17,13 +17,11 @@ def _get_bool(name: str, default: bool) -> bool:
 
 
 @dataclass(frozen=True)
-class XtbConfig:
-    account_mode: str
-    user_id: str
-    password: str
-    host: str
-    port: int
-    use_tls: bool
+class MarketDataConfig:
+    provider: str
+    alpha_vantage_api_key: str
+    alpha_vantage_base_url: str
+    request_timeout_seconds: int
 
 
 @dataclass(frozen=True)
@@ -49,11 +47,14 @@ class UniverseConfig:
 class TelegramConfig:
     bot_token: str
     chat_id: str
+    polling_timeout_seconds: int
+    polling_limit: int
+    drop_pending_updates_on_start: bool
 
 
 @dataclass(frozen=True)
 class AppConfig:
-    xtb: XtbConfig
+    market_data: MarketDataConfig
     risk: RiskConfig
     universe: UniverseConfig
     telegram: TelegramConfig
@@ -64,13 +65,11 @@ class AppConfig:
     @classmethod
     def from_env(cls) -> "AppConfig":
         return cls(
-            xtb=XtbConfig(
-                account_mode=os.getenv("XTB_ACCOUNT_MODE", "demo"),
-                user_id=os.getenv("XTB_USER_ID", ""),
-                password=os.getenv("XTB_PASSWORD", ""),
-                host=os.getenv("XTB_HOST", "ws.xtb.com"),
-                port=int(os.getenv("XTB_PORT", "5124")),
-                use_tls=_get_bool("XTB_USE_TLS", True),
+            market_data=MarketDataConfig(
+                provider=os.getenv("MARKET_DATA_PROVIDER", "synthetic"),
+                alpha_vantage_api_key=os.getenv("ALPHA_VANTAGE_API_KEY", ""),
+                alpha_vantage_base_url=os.getenv("ALPHA_VANTAGE_BASE_URL", "https://www.alphavantage.co/query"),
+                request_timeout_seconds=int(os.getenv("MARKET_DATA_REQUEST_TIMEOUT_SECONDS", "20")),
             ),
             risk=RiskConfig(
                 capital=float(os.getenv("BOT_CAPITAL", "100000")),
@@ -90,6 +89,9 @@ class AppConfig:
             telegram=TelegramConfig(
                 bot_token=os.getenv("TELEGRAM_BOT_TOKEN", ""),
                 chat_id=os.getenv("TELEGRAM_CHAT_ID", ""),
+                polling_timeout_seconds=int(os.getenv("TELEGRAM_POLLING_TIMEOUT_SECONDS", "30")),
+                polling_limit=int(os.getenv("TELEGRAM_POLLING_LIMIT", "25")),
+                drop_pending_updates_on_start=_get_bool("TELEGRAM_DROP_PENDING_UPDATES_ON_START", False),
             ),
             poll_seconds=int(os.getenv("BOT_POLL_SECONDS", "300")),
             log_level=os.getenv("BOT_LOG_LEVEL", "INFO"),

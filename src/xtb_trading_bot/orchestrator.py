@@ -6,7 +6,7 @@ import logging
 from .config import AppConfig
 from .domain import ApprovalStatus, SignalSide
 from .instruments import InstrumentFilter
-from .interfaces import ApprovalService, ExecutionService, MarketDataProvider, StateStore
+from .interfaces import ApprovalService, MarketDataProvider, StateStore
 from .risk import RiskEngine, RiskError
 from .strategy import TrendSignalEngine
 
@@ -15,7 +15,6 @@ from .strategy import TrendSignalEngine
 class TradingBot:
     config: AppConfig
     market_data: MarketDataProvider
-    execution: ExecutionService
     approvals: ApprovalService
     instrument_filter: InstrumentFilter
     strategy: TrendSignalEngine
@@ -28,7 +27,7 @@ class TradingBot:
         tradable = self.instrument_filter.filter_tradable(instruments)
         context_instruments = self.instrument_filter.filter_context(instruments)
         context = self.market_data.get_context([item.symbol for item in context_instruments])
-        positions = self.execution.list_positions()
+        positions = self.market_data.list_positions()
         performance = self.state_store.get_performance()
 
         generated = 0
@@ -51,17 +50,9 @@ class TradingBot:
 
     def process_approvals(self) -> int:
         processed = 0
-        pending_by_id = {proposal.proposal_id: proposal for proposal in self.state_store.list_pending_proposals()}
         for decision in self.approvals.get_pending_decisions():
             self.state_store.record_decision(decision)
-            if decision.status == ApprovalStatus.APPROVED:
-                proposal = pending_by_id.get(decision.proposal_id)
-                if proposal is None:
-                    self.logger.warning("Approved proposal %s no longer pending.", decision.proposal_id)
-                    continue
-                execution_id = self.execution.submit_order(proposal)
-                self.state_store.record_execution(proposal.proposal_id, execution_id)
-            elif decision.status == ApprovalStatus.EXPIRED:
+            if decision.status == ApprovalStatus.EXPIRED:
                 self.state_store.mark_expired(decision.proposal_id)
             processed += 1
         return processed

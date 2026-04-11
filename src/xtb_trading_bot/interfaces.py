@@ -6,10 +6,10 @@ from .domain import (
     ApprovalDecision,
     ContextSnapshot,
     Instrument,
-    OrderProposal,
     PerformanceSnapshot,
     PositionSnapshot,
     Signal,
+    OrderProposal,
 )
 
 
@@ -24,14 +24,6 @@ class MarketDataProvider(Protocol):
         ...
 
     def get_context(self, symbols: list[str]) -> list[ContextSnapshot]:
-        ...
-
-    def login(self) -> bool:
-        ...
-
-
-class ExecutionService(Protocol):
-    def submit_order(self, proposal: OrderProposal) -> str:
         ...
 
     def list_positions(self) -> list[PositionSnapshot]:
@@ -54,9 +46,6 @@ class StateStore(Protocol):
         ...
 
     def record_decision(self, decision: ApprovalDecision) -> None:
-        ...
-
-    def record_execution(self, proposal_id: str, execution_id: str) -> None:
         ...
 
     def has_recent_signal(self, symbol: str, timeframe: str, side: str) -> bool:
