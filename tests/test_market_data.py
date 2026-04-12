@@ -89,6 +89,66 @@ class MarketDataProviderTests(unittest.TestCase):
         self.assertEqual(factory.last_ticker.history_calls, [("1y", "1d", False)])
         self.assertIn(AssetClass.FX, {instrument.asset_class for instrument in provider.list_instruments()})
 
+    def test_yfinance_preserves_exchange_suffix_symbols(self) -> None:
+        class FakeHistory:
+            empty = False
+
+            def __init__(self) -> None:
+                self.rows = [
+                    (
+                        datetime.fromisoformat("2026-04-11T00:00:00+00:00"),
+                        {"Open": 3.9, "High": 4.1, "Low": 3.8, "Close": 4.0, "Volume": 1000},
+                    )
+                ]
+
+            def tail(self, count: int):
+                return self
+
+            def iterrows(self):
+                for row in self.rows:
+                    yield row
+
+        captured: list[str] = []
+        provider = YFinanceMarketDataProvider(
+            MarketDataConfig("yfinance", "", "", 20),
+            self.universe,
+            ticker_factory=lambda symbol: captured.append(symbol) or type("T", (), {"history": lambda self, **kwargs: FakeHistory()})(),
+        )
+
+        provider.get_candles("EDP.LS", "D1", 1)
+
+        self.assertEqual(captured, ["EDP.LS"])
+
+    def test_yfinance_maps_share_class_symbols_to_dash(self) -> None:
+        class FakeHistory:
+            empty = False
+
+            def __init__(self) -> None:
+                self.rows = [
+                    (
+                        datetime.fromisoformat("2026-04-11T00:00:00+00:00"),
+                        {"Open": 500.0, "High": 505.0, "Low": 499.0, "Close": 504.0, "Volume": 1000},
+                    )
+                ]
+
+            def tail(self, count: int):
+                return self
+
+            def iterrows(self):
+                for row in self.rows:
+                    yield row
+
+        captured: list[str] = []
+        provider = YFinanceMarketDataProvider(
+            MarketDataConfig("yfinance", "", "", 20),
+            self.universe,
+            ticker_factory=lambda symbol: captured.append(symbol) or type("T", (), {"history": lambda self, **kwargs: FakeHistory()})(),
+        )
+
+        provider.get_candles("BRK.B", "D1", 1)
+
+        self.assertEqual(captured, ["BRK-B"])
+
     def test_yfinance_wraps_history_timeout_as_market_data_error(self) -> None:
         class TimeoutTicker:
             def history(self, period: str, interval: str, auto_adjust: bool = False):
@@ -98,6 +158,22 @@ class MarketDataProviderTests(unittest.TestCase):
             MarketDataConfig("yfinance", "", "", 20),
             self.universe,
             ticker_factory=lambda symbol: TimeoutTicker(),
+        )
+
+        with self.assertRaises(MarketDataError) as ctx:
+            provider.get_candles("AAPL", "D1", 10)
+
+        self.assertIn("Unable to load price history for AAPL", str(ctx.exception))
+
+    def test_yfinance_wraps_none_type_history_failure_as_market_data_error(self) -> None:
+        class BrokenTicker:
+            def history(self, period: str, interval: str, auto_adjust: bool = False):
+                raise TypeError("'NoneType' object is not subscriptable")
+
+        provider = YFinanceMarketDataProvider(
+            MarketDataConfig("yfinance", "", "", 20),
+            self.universe,
+            ticker_factory=lambda symbol: BrokenTicker(),
         )
 
         with self.assertRaises(MarketDataError) as ctx:

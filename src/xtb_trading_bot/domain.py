@@ -64,6 +64,12 @@ class Signal:
     entry: float | None
     stop_loss: float | None
     take_profit: float | None
+    expected_return: float | None = None
+    adjusted_return: float | None = None
+    normalized_score: float | None = None
+    uncertainty: float | None = None
+    probability_positive: float | None = None
+    horizon_days: int | None = None
     created_at: datetime = field(default_factory=utc_now)
 
 

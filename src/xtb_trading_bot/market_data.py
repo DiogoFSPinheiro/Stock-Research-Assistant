@@ -44,6 +44,8 @@ def _is_retryable_market_data_exception(exc: Exception) -> bool:
         or "readtimeout" in name
         or "connectionerror" in name
         or "remote" in message
+        or "nonetype" in message
+        or "subscriptable" in message
     )
 
 
@@ -105,7 +107,15 @@ def _infer_asset_class(symbol: str) -> AssetClass:
 
 
 def _provider_symbol(symbol: str) -> str:
-    return symbol.replace(".", "-") if _infer_asset_class(symbol) == AssetClass.STOCK else symbol
+    if _infer_asset_class(symbol) != AssetClass.STOCK:
+        return symbol
+    if "." not in symbol:
+        return symbol
+    head, tail = symbol.rsplit(".", 1)
+    # Yahoo uses dashes for US share classes like BRK.B, but keeps exchange suffixes such as EDP.LS.
+    if tail.isalpha() and len(tail) == 1:
+        return f"{head}-{tail}"
+    return symbol
 
 
 @dataclass

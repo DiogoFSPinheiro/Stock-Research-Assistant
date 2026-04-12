@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from logging import Logger
+import threading
 import time
 
 from .config import AppConfig, ConfigError
@@ -14,11 +15,44 @@ from .strategy import UndervaluedStockEngine
 from .telegram_service import TelegramApiError, TelegramApprovalService
 
 
+class TerminalStopController:
+    def __init__(self) -> None:
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        if self._thread is not None:
+            return
+        self._thread = threading.Thread(target=self._read_commands, name="terminal-stop-listener", daemon=True)
+        self._thread.start()
+
+    def should_stop(self) -> bool:
+        return self._stop_event.is_set()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+
+    def _read_commands(self) -> None:
+        while not self._stop_event.is_set():
+            try:
+                raw = input()
+            except EOFError:
+                return
+            except KeyboardInterrupt:
+                self._stop_event.set()
+                return
+            command = raw.strip().lower()
+            if command in {"stop", "quit", "exit"}:
+                self._stop_event.set()
+                return
+
+
 def configure_logging(level: str) -> Logger:
     logging.basicConfig(
         level=getattr(logging, level.upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    logging.getLogger("yfinance").setLevel(logging.CRITICAL)
     return logging.getLogger("xtb_trading_bot")
 
 
@@ -63,15 +97,23 @@ def main() -> int:
         len(bot.config.universe.allowed_stocks),
         bot.config.poll_seconds,
     )
+    bot.logger.info("Type `stop`, `quit`, or `exit` then press Enter to stop the bot cleanly.")
     next_scan_at = time.monotonic()
     tip_poll_interval = min(5, max(bot.config.telegram.polling_timeout_seconds, 1))
+    stop_controller = TerminalStopController()
+    stop_controller.start()
     try:
         while True:
             try:
+                if stop_controller.should_stop():
+                    bot.logger.info("Signal bot stopped by user.")
+                    return 0
                 generated = 0
+                ran_scheduled_scan = False
                 if time.monotonic() >= next_scan_at:
                     generated += bot.scan()
                     next_scan_at = time.monotonic() + bot.config.poll_seconds
+                    ran_scheduled_scan = True
 
                 if hasattr(bot.approvals, "poll_commands"):
                     commands = bot.approvals.poll_commands()
@@ -87,6 +129,20 @@ def main() -> int:
                             chat_id=getattr(command, "chat_id", None),
                             allow_repeat=True,
                             notify_when_empty=True,
+                        )
+                        continue
+                    if kind == "tip_for_symbol":
+                        generated += bot.send_tip(
+                            chat_id=getattr(command, "chat_id", None),
+                            allow_repeat=True,
+                            notify_when_empty=True,
+                            symbol=getattr(command, "symbol", None),
+                        )
+                        continue
+                    if kind == "top_tips":
+                        generated += bot.send_top_tips(
+                            chat_id=getattr(command, "chat_id", None),
+                            limit=getattr(command, "limit", None) or 5,
                         )
                         continue
                     if kind == "add_stock":
@@ -112,11 +168,17 @@ def main() -> int:
                         notify_when_empty=True,
                     )
                 processed = bot.process_approvals()
-                bot.logger.info("Cycle finished. Generated=%s polled=%s processed=%s", generated, polled, processed)
+                if ran_scheduled_scan or polled or processed or generated:
+                    bot.logger.info("Cycle finished. Generated=%s polled=%s processed=%s", generated, polled, processed)
+            except KeyboardInterrupt:
+                stop_controller.stop()
+                bot.logger.info("Signal bot stopped by user.")
+                return 0
             except (MarketDataError, TelegramApiError, TimeoutError, OSError) as exc:
                 bot.logger.warning("Cycle failed due to runtime error: %s", exc)
             time.sleep(tip_poll_interval)
     except KeyboardInterrupt:
+        stop_controller.stop()
         bot.logger.info("Signal bot stopped by user.")
         return 0
     return 0

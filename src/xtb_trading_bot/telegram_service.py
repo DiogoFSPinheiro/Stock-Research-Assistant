@@ -40,6 +40,7 @@ class TelegramCommand:
     actor: str
     text: str
     symbol: str | None = None
+    limit: int | None = None
 
 
 def _default_post(url: str, payload: dict) -> None:
@@ -97,10 +98,20 @@ class TelegramApprovalService:
         normalized = " ".join(update.text.strip().split())
         lowered = normalized.lower().replace('"', "").replace("'", "")
         first = lowered.split(" ", 1)[0].split("@", 1)[0]
+        parts = normalized.replace('"', "").replace("'", "").split()
         if first in {"/tip", "/give_a_tip", "tip"} or lowered == "give a tip":
-            return TelegramCommand(kind="tip", chat_id=update.chat_id, actor=update.actor, text=update.text)
+            symbol = parts[1].upper() if len(parts) >= 2 else None
+            kind = "tip_for_symbol" if symbol else "tip"
+            return TelegramCommand(kind=kind, chat_id=update.chat_id, actor=update.actor, text=update.text, symbol=symbol)
+        if first in {"/top", "/tips"}:
+            limit = None
+            if len(parts) >= 2:
+                try:
+                    limit = max(1, min(int(parts[1]), 10))
+                except ValueError:
+                    limit = None
+            return TelegramCommand(kind="top_tips", chat_id=update.chat_id, actor=update.actor, text=update.text, limit=limit)
         if first in {"/add", "add"}:
-            parts = normalized.replace('"', "").replace("'", "").split()
             if len(parts) >= 2:
                 return TelegramCommand(
                     kind="add_stock",
@@ -136,13 +147,23 @@ class TelegramApprovalService:
         target_chat_id = self._resolve_chat_id(chat_id)
         if not self.config.bot_token or not target_chat_id:
             return
+        expected_return = "n/a" if signal.expected_return is None else f"{signal.expected_return:.1%}"
+        uncertainty = "n/a" if signal.uncertainty is None else f"{signal.uncertainty:.1%}"
+        probability_up = "n/a" if signal.probability_positive is None else f"{signal.probability_positive:.0%}"
+        adjusted_score = "n/a" if signal.normalized_score is None else f"{signal.normalized_score:.2%}"
+        best_horizon = "n/a" if signal.horizon_days is None else _format_horizon(signal.horizon_days)
         text = (
             f"Undervalued Stock Pick\n"
             f"Ticker: {signal.symbol}\n"
-            f"Timeframe: {signal.timeframe}\n"
+            f"Best Horizon: {best_horizon}\n"
+            f"Model Window: {signal.timeframe}\n"
             f"Entry Price: {proposal.entry:.4f}\n"
             f"Exit Price: {proposal.take_profit:.4f}\n"
-            f"Confidence: {signal.confidence:.2f}\n"
+            f"Expected Return: {expected_return}\n"
+            f"Uncertainty: {uncertainty}\n"
+            f"Probability Up: {probability_up}\n"
+            f"Adjusted Score/Day: {adjusted_score}\n"
+            f"Confidence: {signal.confidence:.0%}\n"
             f"Why: {signal.rationale}"
         )
         self._send_message(target_chat_id, text)
@@ -211,3 +232,13 @@ class TelegramApprovalService:
     def get_pending_decisions(self) -> list[ApprovalDecision]:
         decisions, self.decisions = self.decisions[:], []
         return decisions
+
+
+def _format_horizon(horizon_days: int) -> str:
+    if horizon_days == 1:
+        return "1 day"
+    if horizon_days < 21:
+        return f"{horizon_days} days"
+    if horizon_days < 126:
+        return "1 month"
+    return "6 months"

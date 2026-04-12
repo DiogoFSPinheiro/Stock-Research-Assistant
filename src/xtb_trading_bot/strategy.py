@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from hashlib import sha1
+import math
 from statistics import mean
 
 from .domain import AssetClass, Candle, ContextSnapshot, Instrument, Signal, SignalSide, StockFundamentals
@@ -51,6 +52,9 @@ def _bounded_score(value: float | None, low: float, high: float, inverse: bool =
 class UndervaluedStockEngine:
     state_store: StateStore
     minimum_confidence: float = 0.60
+    minimum_probability_positive: float = 0.50
+    uncertainty_penalty: float = 0.45
+    horizon_days: tuple[int, ...] = (1, 5, 21, 126)
 
     def evaluate(
         self,
@@ -71,6 +75,12 @@ class UndervaluedStockEngine:
         ema_20 = _ema(closes[-20:], 8)
         ema_50 = _ema(closes[-50:], 21)
         atr = _atr(candles)
+        daily_returns = [
+            (closes[index] - closes[index - 1]) / closes[index - 1]
+            for index in range(1, len(closes))
+            if closes[index - 1]
+        ]
+        realized_volatility = math.sqrt(mean([value * value for value in daily_returns[-20:]]) or 0.0) if daily_returns else 0.0
         context_score = mean(snapshot.trend_score for snapshot in context) if context else 0.0
         risk_on = all(snapshot.risk_on for snapshot in context) if context else True
 
@@ -101,6 +111,10 @@ class UndervaluedStockEngine:
             ]
         )
         confidence = round(valuation_score * 0.65 + technical_score * 0.35, 4)
+        trend_gap = abs(ema_20 - ema_50) / ema_50 if ema_50 else 0.0
+        short_momentum = (current - closes[-6]) / closes[-6] if len(closes) >= 6 and closes[-6] else 0.0
+        medium_momentum = (current - closes[-22]) / closes[-22] if len(closes) >= 22 and closes[-22] else short_momentum
+        long_momentum = (current - closes[0]) / closes[0] if closes[0] else medium_momentum
 
         if not risk_on:
             return self._no_trade(instrument, timeframe, "Market context is risk-off.")
@@ -113,29 +127,89 @@ class UndervaluedStockEngine:
         if not allow_repeat and self.state_store.has_recent_signal(instrument.symbol, timeframe, SignalSide.BUY.value):
             return self._no_trade(instrument, timeframe, "Duplicate stock pick suppressed.")
 
-        stop_distance = max(atr * 1.2, current * 0.06)
-        entry = round(min(current, ema_20 * 1.01), 4)
-        stop_loss = round(entry - stop_distance, 4)
-        target_base = fundamentals.target_mean_price if fundamentals.target_mean_price else entry + stop_distance * 2.2
-        take_profit = round(max(target_base, entry + stop_distance * 1.8), 4)
+        horizon_signals: list[Signal] = []
+        base_target_gap = discount_to_target or 0.0
+        for horizon_days in self.horizon_days:
+            horizon_label = self._horizon_label(horizon_days)
+            momentum_weight = min(1.0, horizon_days / 21)
+            target_weight = 1.0 - (0.35 * momentum_weight)
+            momentum_signal = mean(
+                [
+                    short_momentum,
+                    medium_momentum * min(1.0, horizon_days / 21),
+                    long_momentum * min(1.0, horizon_days / 126),
+                    context_score,
+                ]
+            )
+            expected_return = max(
+                -0.25,
+                min(
+                    0.35,
+                    (base_target_gap * target_weight) + (momentum_signal * 0.55) + ((confidence - 0.5) * 0.10),
+                ),
+            )
+            horizon_uncertainty = max(
+                0.01,
+                (realized_volatility * math.sqrt(max(horizon_days, 1)))
+                + (trend_gap * 0.12)
+                + ((1 - confidence) * 0.08),
+            )
+            adjusted_return = expected_return - (self.uncertainty_penalty * horizon_uncertainty)
+            normalized_score = adjusted_return / horizon_days
+            probability_positive = _normal_cdf(expected_return / horizon_uncertainty) if horizon_uncertainty else 1.0
+            buy_confidence = max(0.0, min(0.99, confidence * probability_positive))
+            if adjusted_return <= 0 or probability_positive < self.minimum_probability_positive:
+                continue
 
-        digest = sha1(f"{instrument.symbol}:{timeframe}:BUY:{entry}:{take_profit}".encode("utf-8")).hexdigest()[:12]
-        rationale = (
-            f"Undervalued stock candidate: valuation={valuation_score:.2f}, technical={technical_score:.2f}, "
-            f"forwardPE={_fmt(fundamentals.forward_pe)}, P/B={_fmt(fundamentals.price_to_book)}, "
-            f"ROE={_fmt_pct(fundamentals.return_on_equity)}, targetGap={_fmt_pct(discount_to_target)}"
-        )
-        return Signal(
-            signal_id=digest,
-            symbol=instrument.symbol,
-            asset_class=instrument.asset_class,
-            side=SignalSide.BUY,
-            timeframe=timeframe,
-            confidence=confidence,
-            rationale=rationale,
-            entry=entry,
-            stop_loss=stop_loss,
-            take_profit=take_profit,
+            entry = round(min(current, ema_20 * 1.01), 4)
+            target_price = current * (1 + expected_return)
+            stop_distance = max(atr * 1.2, current * (0.02 + (horizon_uncertainty * 0.5)))
+            stop_loss = round(entry - stop_distance, 4)
+            take_profit = round(max(target_price, entry + stop_distance * 1.8), 4)
+            digest = sha1(
+                f"{instrument.symbol}:{timeframe}:{horizon_days}:BUY:{entry}:{take_profit}".encode("utf-8")
+            ).hexdigest()[:12]
+            rationale = (
+                f"Best horizon {horizon_label}: expected={expected_return:.1%}, adjusted={adjusted_return:.1%}, "
+                f"probUp={probability_positive:.0%}, valuation={valuation_score:.2f}, technical={technical_score:.2f}, "
+                f"forwardPE={_fmt(fundamentals.forward_pe)}, P/B={_fmt(fundamentals.price_to_book)}, "
+                f"ROE={_fmt_pct(fundamentals.return_on_equity)}, targetGap={_fmt_pct(discount_to_target)}"
+            )
+            horizon_signals.append(
+                Signal(
+                    signal_id=digest,
+                    symbol=instrument.symbol,
+                    asset_class=instrument.asset_class,
+                    side=SignalSide.BUY,
+                    timeframe=timeframe,
+                    confidence=round(buy_confidence, 4),
+                    rationale=rationale,
+                    entry=entry,
+                    stop_loss=stop_loss,
+                    take_profit=take_profit,
+                    expected_return=round(expected_return, 6),
+                    adjusted_return=round(adjusted_return, 6),
+                    normalized_score=round(normalized_score, 6),
+                    uncertainty=round(horizon_uncertainty, 6),
+                    probability_positive=round(probability_positive, 6),
+                    horizon_days=horizon_days,
+                )
+            )
+
+        if not horizon_signals:
+            return self._no_trade(
+                instrument,
+                timeframe,
+                "All forecast horizons were filtered out by uncertainty or low probability of gains.",
+            )
+
+        return max(
+            horizon_signals,
+            key=lambda signal: (
+                signal.normalized_score if signal.normalized_score is not None else float("-inf"),
+                signal.probability_positive if signal.probability_positive is not None else float("-inf"),
+                signal.confidence,
+            ),
         )
 
     def _no_trade(self, instrument: Instrument, timeframe: str, rationale: str) -> Signal:
@@ -153,6 +227,15 @@ class UndervaluedStockEngine:
             take_profit=None,
         )
 
+    def _horizon_label(self, horizon_days: int) -> str:
+        if horizon_days == 1:
+            return "1d"
+        if horizon_days < 21:
+            return f"{horizon_days}d"
+        if horizon_days < 126:
+            return "1m"
+        return "6m"
+
 
 def _fmt(value: float | None) -> str:
     return "n/a" if value is None else f"{value:.2f}"
@@ -160,3 +243,7 @@ def _fmt(value: float | None) -> str:
 
 def _fmt_pct(value: float | None) -> str:
     return "n/a" if value is None else f"{value:.1%}"
+
+
+def _normal_cdf(value: float) -> float:
+    return 0.5 * (1 + math.erf(value / math.sqrt(2)))

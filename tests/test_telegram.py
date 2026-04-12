@@ -92,6 +92,7 @@ class TelegramApprovalServiceTests(unittest.TestCase):
         self.assertEqual(len(self.calls), 1)
         self.assertIn("Undervalued Stock Pick", self.calls[0][1]["text"])
         self.assertIn("Ticker: AAPL", self.calls[0][1]["text"])
+        self.assertIn("Best Horizon:", self.calls[0][1]["text"])
         self.assertIn("Entry Price: 100.0000", self.calls[0][1]["text"])
         self.assertIn("Exit Price: 110.0000", self.calls[0][1]["text"])
 
@@ -194,6 +195,54 @@ class TelegramApprovalServiceTests(unittest.TestCase):
             [TelegramCommand(kind="add_stock", chat_id=999, actor="alice", text='add "NVDA"', symbol="NVDA")],
         )
         self.assertEqual(self.service.last_update_id, 56)
+
+    def test_poll_commands_parses_top_tips_limit(self) -> None:
+        self.responses.append(
+            {
+                "ok": True,
+                "result": [
+                    {
+                        "update_id": 57,
+                        "message": {
+                            "chat": {"id": 999},
+                            "from": {"username": "alice"},
+                            "text": "/top 3",
+                        },
+                    }
+                ],
+            }
+        )
+
+        results = self.service.poll_commands()
+
+        self.assertEqual(
+            results,
+            [TelegramCommand(kind="top_tips", chat_id=999, actor="alice", text="/top 3", symbol=None, limit=3)],
+        )
+
+    def test_poll_commands_parses_specific_ticker_tip(self) -> None:
+        self.responses.append(
+            {
+                "ok": True,
+                "result": [
+                    {
+                        "update_id": 58,
+                        "message": {
+                            "chat": {"id": 999},
+                            "from": {"username": "alice"},
+                            "text": "/tip aapl",
+                        },
+                    }
+                ],
+            }
+        )
+
+        results = self.service.poll_commands()
+
+        self.assertEqual(
+            results,
+            [TelegramCommand(kind="tip_for_symbol", chat_id=999, actor="alice", text="/tip aapl", symbol="AAPL", limit=None)],
+        )
 
     def test_poll_commands_swallows_get_updates_errors(self) -> None:
         self.service.http_get = lambda url: (_ for _ in ()).throw(TelegramApiError("Telegram getUpdates failed: timed out"))

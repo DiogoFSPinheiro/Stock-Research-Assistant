@@ -5,10 +5,10 @@ import logging
 import unittest
 import uuid
 
-from xtb_trading_bot.config import AppConfig, MarketDataConfig, RiskConfig, TelegramConfig, UniverseConfig
+from xtb_trading_bot.config import AppConfig, ConfigError, MarketDataConfig, RiskConfig, TelegramConfig, UniverseConfig
 from xtb_trading_bot.domain import StockFundamentals
 from xtb_trading_bot.instruments import InstrumentFilter
-from xtb_trading_bot.market_data import SyntheticMarketDataProvider
+from xtb_trading_bot.market_data import MarketDataError, SyntheticMarketDataProvider
 from xtb_trading_bot.orchestrator import TradingBot
 from xtb_trading_bot.risk import RiskEngine
 from xtb_trading_bot.storage import JsonStateStore
@@ -105,6 +105,27 @@ class TradingBotTests(unittest.TestCase):
         self.assertEqual(first, 1)
         self.assertEqual(second, 1)
 
+    def test_send_tip_for_specific_symbol(self) -> None:
+        sent_messages: list[str] = []
+        self.bot.approvals.http_post = lambda url, payload: sent_messages.append(payload["text"])
+
+        generated = self.bot.send_tip(chat_id="chat", allow_repeat=True, notify_when_empty=True, symbol="MSFT")
+
+        self.assertEqual(generated, 1)
+        self.assertEqual(len(sent_messages), 1)
+        self.assertIn("Ticker: MSFT", sent_messages[0])
+
+    def test_send_top_tips_publishes_ranked_summary(self) -> None:
+        sent_messages: list[str] = []
+        self.bot.approvals.http_post = lambda url, payload: sent_messages.append(payload["text"])
+
+        generated = self.bot.send_top_tips(chat_id="chat", limit=2)
+
+        self.assertGreaterEqual(generated, 1)
+        self.assertEqual(len(sent_messages), 1)
+        self.assertIn("TOP TIPS TODAY", sent_messages[0])
+        self.assertIn("1.", sent_messages[0])
+
     def test_add_stock_updates_runtime_universe_without_restart(self) -> None:
         added, symbol, total = self.bot.add_stock("NVDA")
 
@@ -112,6 +133,21 @@ class TradingBotTests(unittest.TestCase):
         self.assertEqual(symbol, "NVDA")
         self.assertEqual(total, 3)
         self.assertIn("NVDA", self.bot.config.universe.allowed_stocks)
+
+    def test_add_stock_rejects_invalid_market_symbol(self) -> None:
+        original_get_candles = self.bot.market_data.get_candles
+
+        def fail_for_bad_symbol(symbol: str, timeframe: str, limit: int):
+            if symbol == "BAD.LS":
+                raise MarketDataError("No price history returned.")
+            return original_get_candles(symbol, timeframe, limit)
+
+        self.bot.market_data.get_candles = fail_for_bad_symbol
+
+        with self.assertRaises(ConfigError):
+            self.bot.add_stock("BAD.LS")
+
+        self.assertNotIn("BAD.LS", self.bot.config.universe.allowed_stocks)
 
 
 if __name__ == "__main__":
