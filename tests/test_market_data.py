@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+from pathlib import Path
 import unittest
 
 from xtb_trading_bot.config import MarketDataConfig, UniverseConfig
 from xtb_trading_bot.domain import AssetClass
-from xtb_trading_bot.market_data import AlphaVantageMarketDataProvider, SyntheticMarketDataProvider
+from xtb_trading_bot.market_data import MarketDataError, SyntheticMarketDataProvider, YFinanceMarketDataProvider
 
 
 class MarketDataProviderTests(unittest.TestCase):
@@ -12,6 +14,7 @@ class MarketDataProviderTests(unittest.TestCase):
         self.universe = UniverseConfig(
             allowed_fx=("EURUSD",),
             allowed_stocks=("AAPL",),
+            stock_universe_path=Path("config/stock_universe.txt"),
             context_symbols=("SPX500",),
             allowed_timeframes=("H4", "D1"),
         )
@@ -27,39 +30,127 @@ class MarketDataProviderTests(unittest.TestCase):
         self.assertIn("SPX500", symbols)
         self.assertIn("OIL_FUT", symbols)
 
-    def test_alpha_vantage_daily_stock_parse(self) -> None:
-        def fake_get(url: str, timeout: int) -> dict:
-            self.assertIn("TIME_SERIES_DAILY_ADJUSTED", url)
-            return {
-                "Time Series (Daily)": {
-                    "2026-04-10": {
-                        "1. open": "100.0",
-                        "2. high": "110.0",
-                        "3. low": "99.0",
-                        "4. close": "108.0",
-                        "6. volume": "12345",
-                    },
-                    "2026-04-11": {
-                        "1. open": "108.0",
-                        "2. high": "112.0",
-                        "3. low": "107.0",
-                        "4. close": "111.0",
-                        "6. volume": "22345",
-                    },
-                }
-            }
+    def test_yfinance_daily_parse_for_fx_symbol(self) -> None:
+        class FakeHistory:
+            def __init__(self, rows):
+                self.rows = rows
+                self.empty = False
 
-        provider = AlphaVantageMarketDataProvider(
-            MarketDataConfig("alpha_vantage", "demo", "https://www.alphavantage.co/query", 20),
+            def tail(self, count: int):
+                return FakeHistory(self.rows[-count:])
+
+            def iterrows(self):
+                for timestamp, values in self.rows:
+                    yield timestamp, values
+
+        class FakeTicker:
+            def __init__(self, symbol: str) -> None:
+                self.symbol = symbol
+                self.history_calls: list[tuple[str, str, bool]] = []
+
+            def history(self, period: str, interval: str, auto_adjust: bool = False):
+                self.history_calls.append((period, interval, auto_adjust))
+                return FakeHistory(
+                    [
+                        (
+                            datetime.fromisoformat("2026-04-10T00:00:00+00:00"),
+                            {"Open": 1.10, "High": 1.12, "Low": 1.09, "Close": 1.11, "Volume": 1000},
+                        ),
+                        (
+                            datetime.fromisoformat("2026-04-11T00:00:00+00:00"),
+                            {"Open": 1.11, "High": 1.13, "Low": 1.10, "Close": 1.12, "Volume": 1200},
+                        ),
+                    ]
+                )
+
+        class FakeTickerFactory:
+            def __init__(self) -> None:
+                self.last_ticker: FakeTicker | None = None
+
+            def __call__(self, symbol: str) -> FakeTicker:
+                self.last_ticker = FakeTicker(symbol)
+                return self.last_ticker
+
+        factory = FakeTickerFactory()
+        provider = YFinanceMarketDataProvider(
+            MarketDataConfig("yfinance", "", "", 20),
             self.universe,
-            http_get_json=fake_get,
+            ticker_factory=factory,
         )
 
-        candles = provider.get_candles("AAPL", "D1", 2)
+        candles = provider.get_candles("EURUSD", "D1", 2)
 
         self.assertEqual(len(candles), 2)
-        self.assertEqual(candles[-1].close, 111.0)
-        self.assertEqual(provider.list_instruments()[0].asset_class, AssetClass.FX)
+        self.assertEqual([candle.close for candle in candles], [1.11, 1.12])
+        self.assertEqual(candles[0].timestamp.tzinfo, timezone.utc)
+        self.assertLess(candles[0].timestamp, candles[1].timestamp)
+        self.assertIsNotNone(factory.last_ticker)
+        self.assertEqual(factory.last_ticker.symbol, "EURUSD=X")
+        self.assertEqual(factory.last_ticker.history_calls, [("1y", "1d", False)])
+        self.assertIn(AssetClass.FX, {instrument.asset_class for instrument in provider.list_instruments()})
+
+    def test_yfinance_wraps_history_timeout_as_market_data_error(self) -> None:
+        class TimeoutTicker:
+            def history(self, period: str, interval: str, auto_adjust: bool = False):
+                raise TimeoutError("The read operation timed out")
+
+        provider = YFinanceMarketDataProvider(
+            MarketDataConfig("yfinance", "", "", 20),
+            self.universe,
+            ticker_factory=lambda symbol: TimeoutTicker(),
+        )
+
+        with self.assertRaises(MarketDataError) as ctx:
+            provider.get_candles("AAPL", "D1", 10)
+
+        self.assertIn("Unable to load price history for AAPL", str(ctx.exception))
+
+    def test_yfinance_reuses_cached_ticker_and_history(self) -> None:
+        class FakeHistory:
+            empty = False
+
+            def __init__(self) -> None:
+                self.rows = [
+                    (
+                        datetime.fromisoformat("2026-04-10T00:00:00+00:00"),
+                        {"Open": 10.0, "High": 12.0, "Low": 9.0, "Close": 11.0, "Volume": 1000},
+                    ),
+                    (
+                        datetime.fromisoformat("2026-04-11T00:00:00+00:00"),
+                        {"Open": 11.0, "High": 13.0, "Low": 10.0, "Close": 12.0, "Volume": 1200},
+                    ),
+                ]
+
+            def tail(self, count: int):
+                return self
+
+            def iterrows(self):
+                for row in self.rows:
+                    yield row
+
+        class FakeTicker:
+            def __init__(self) -> None:
+                self.history_calls = 0
+
+            def history(self, period: str, interval: str, auto_adjust: bool = False):
+                self.history_calls += 1
+                return FakeHistory()
+
+        factory_calls: list[str] = []
+        ticker = FakeTicker()
+        provider = YFinanceMarketDataProvider(
+            MarketDataConfig("yfinance", "", "", 20),
+            self.universe,
+            ticker_factory=lambda symbol: factory_calls.append(symbol) or ticker,
+        )
+
+        first = provider.get_candles("AAPL", "D1", 2)
+        second = provider.get_candles("AAPL", "D1", 2)
+
+        self.assertEqual([c.close for c in first], [11.0, 12.0])
+        self.assertEqual([c.close for c in second], [11.0, 12.0])
+        self.assertEqual(factory_calls, ["AAPL"])
+        self.assertEqual(ticker.history_calls, 1)
 
 
 if __name__ == "__main__":

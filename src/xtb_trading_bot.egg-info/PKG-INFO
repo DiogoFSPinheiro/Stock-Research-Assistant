@@ -1,6 +1,15 @@
+Metadata-Version: 2.4
+Name: xtb-trading-bot
+Version: 0.1.0
+Summary: Signal-only Telegram bot for stocks and FX trade ideas.
+Author: Codex
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: yfinance>=0.2.54
+
 # Trading Bot
 
-Local Python bot that scans a stock universe from a file, ranks undervalued candidates using fundamentals plus price structure, and sends the single best stock pick to Telegram with ticker, entry price, and exit price.
+Local Python bot that scans a stock universe, ranks undervalued candidates using fundamentals plus price structure, and sends the single best stock pick to Telegram with ticker, entry price, and exit price.
 
 ## Features
 
@@ -8,8 +17,6 @@ Local Python bot that scans a stock universe from a file, ranks undervalued cand
 - Fundamental ranking using valuation and quality metrics
 - Technical overlay for entry and exit price calculation
 - Telegram delivery with clean ticker/entry/exit messages
-- On-demand Telegram tip requests with `/tip` or `give a tip`
-- Runtime stock universe updates without restarting the bot
 - JSON persistence for picks and analysis history
 - Unit test suite covering filters, ranking logic, Telegram flow, and orchestration
 
@@ -17,8 +24,6 @@ Local Python bot that scans a stock universe from a file, ranks undervalued cand
 
 - The bot is designed to run locally as a background process.
 - Telegram is the primary user interface for receiving the best stock pick.
-- Send `/tip` in Telegram whenever you want an immediate fresh scan without waiting for the next scheduled cycle.
-- Send `add NVDA` or `/add NVDA` in Telegram to append a stock to the universe file and use it on the next scan.
 - Market data is required for stocks; the project does not execute trades.
 - The code is designed to use `yfinance` by default for market data, so you can run it without a paid API key.
 - `synthetic` remains available for local dry runs and reproducible tests.
@@ -68,11 +73,8 @@ python -m xtb_trading_bot
 ## Configuration
 
 - `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are required for delivery.
-- Use `/tip` or send `give a tip` in Telegram to trigger an immediate extra stock scan.
-- You can edit the stock universe file while the bot is running; it reloads the file automatically before scans.
 - `MARKET_DATA_PROVIDER=yfinance` is the default live-data path; `synthetic` is still available for local dry runs.
 - `BOT_ALLOWED_STOCKS` defines the stock universe the picker will rank.
-- `BOT_STOCK_UNIVERSE_PATH` points to the text file containing the stock universe, one ticker per line.
 - `BOT_CONTEXT_SYMBOLS` is optional and can be used for market regime context only.
 - `BOT_ALLOWED_FX` is no longer used by the default runtime flow.
 - `XTB_*` variables are deprecated placeholders and should not be used.

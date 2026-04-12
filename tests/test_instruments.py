@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 import unittest
 
 from xtb_trading_bot.config import UniverseConfig
@@ -13,6 +14,7 @@ class InstrumentFilterTests(unittest.TestCase):
             UniverseConfig(
                 allowed_fx=("EURUSD",),
                 allowed_stocks=("AAPL",),
+                stock_universe_path=Path("config/stock_universe.txt"),
                 context_symbols=("SPX500",),
                 allowed_timeframes=("H4", "D1"),
             )

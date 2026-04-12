@@ -3,3 +3,4 @@ __pycache__/
 .test-artifacts/
 data/
 .uv-cache/
+.env

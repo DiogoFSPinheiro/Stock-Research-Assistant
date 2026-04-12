@@ -4,7 +4,7 @@ import importlib.util
 from pathlib import Path
 import sys
 import types
-from datetime import datetime, timezone
+from datetime import timezone
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,10 +32,12 @@ telegram_module = _load_module("xtb_trading_bot.telegram_service")
 TelegramConfig = config_module.TelegramConfig
 AssetClass = domain_module.AssetClass
 OrderProposal = domain_module.OrderProposal
-PositionSnapshot = domain_module.PositionSnapshot
 Signal = domain_module.Signal
 SignalSide = domain_module.SignalSide
 TelegramApprovalService = telegram_module.TelegramApprovalService
+TelegramApiError = telegram_module.TelegramApiError
+TelegramCommand = telegram_module.TelegramCommand
+TipRequest = telegram_module.TipRequest
 
 
 class TelegramApprovalServiceTests(unittest.TestCase):
@@ -88,29 +90,12 @@ class TelegramApprovalServiceTests(unittest.TestCase):
     def test_publish_signal_sends_message(self) -> None:
         self.service.publish_signal(self.signal, self.proposal)
         self.assertEqual(len(self.calls), 1)
-        self.assertIn("/approve prop1", self.calls[0][1]["text"])
+        self.assertIn("Undervalued Stock Pick", self.calls[0][1]["text"])
+        self.assertIn("Ticker: AAPL", self.calls[0][1]["text"])
+        self.assertIn("Entry Price: 100.0000", self.calls[0][1]["text"])
+        self.assertIn("Exit Price: 110.0000", self.calls[0][1]["text"])
 
-    def test_approve_command_creates_decision(self) -> None:
-        self.service.publish_signal(self.signal, self.proposal)
-        result = self.service.receive_command("/approve prop1")
-        self.assertEqual(result.status.value, "approved")
-
-    def test_positions_command_lists_positions(self) -> None:
-        self.service.positions_provider = lambda: [
-            PositionSnapshot("AAPL", SignalSide.BUY, 10, 100, 103, 30, 20)
-        ]
-        result = self.service.receive_command("/positions")
-        self.assertIn("AAPL BUY", result)
-
-    def test_pending_command_lists_published_proposals(self) -> None:
-        self.service.published_proposals["prop1"] = datetime.now(timezone.utc)
-
-        result = self.service.receive_command("/pending")
-
-        self.assertEqual(result, "prop1")
-
-    def test_poll_updates_processes_commands_and_replies(self) -> None:
-        self.service.published_proposals["prop1"] = datetime.now(timezone.utc)
+    def test_poll_tip_requests_returns_tip_command_without_replying(self) -> None:
         self.responses.append(
             {
                 "ok": True,
@@ -120,22 +105,18 @@ class TelegramApprovalServiceTests(unittest.TestCase):
                         "message": {
                             "chat": {"id": 999},
                             "from": {"username": "alice"},
-                            "text": "/approve@TradingBot prop1",
+                            "text": "/tip",
                         },
                     }
                 ],
             }
         )
 
-        results = self.service.poll_updates(reply=True)
+        results = self.service.poll_tip_requests()
 
-        self.assertEqual(len(results), 1)
-        self.assertEqual(results[0].status.value, "approved")
+        self.assertEqual(results, [TipRequest(chat_id=999, actor="alice", text="/tip")])
         self.assertEqual(self.service.last_update_id, 41)
-        self.assertEqual(len(self.calls), 1)
-        self.assertEqual(self.calls[0][0], "https://api.telegram.org/bottoken/sendMessage")
-        self.assertEqual(self.calls[0][1]["chat_id"], 999)
-        self.assertEqual(self.calls[0][1]["text"], "Approved proposal prop1.")
+        self.assertEqual(self.calls, [])
         self.assertTrue(self.get_calls[0].startswith("https://api.telegram.org/bottoken/getUpdates?"))
         self.assertIn("timeout=2", self.get_calls[0])
         self.assertIn("limit=25", self.get_calls[0])
@@ -151,7 +132,7 @@ class TelegramApprovalServiceTests(unittest.TestCase):
                             "message": {
                                 "chat": {"id": 999},
                                 "from": {"username": "alice"},
-                                "text": "/pending",
+                                "text": "/positions",
                             },
                         }
                     ],
@@ -160,12 +141,88 @@ class TelegramApprovalServiceTests(unittest.TestCase):
             ]
         )
 
-        self.service.poll_updates()
-        self.service.poll_updates()
+        self.service.poll_tip_requests()
+        self.service.poll_tip_requests()
 
         self.assertEqual(self.service.last_update_id, 10)
         self.assertIn("offset=11", self.get_calls[-1])
         self.assertEqual(self.get_calls[-1].count("offset="), 1)
+
+    def test_poll_tip_requests_ignores_unrelated_commands(self) -> None:
+        self.responses.append(
+            {
+                "ok": True,
+                "result": [
+                    {
+                        "update_id": 55,
+                        "message": {
+                            "chat": {"id": 999},
+                            "from": {"username": "alice"},
+                            "text": "/positions",
+                        },
+                    }
+                ],
+            }
+        )
+
+        results = self.service.poll_tip_requests()
+
+        self.assertEqual(results, [])
+        self.assertEqual(self.service.last_update_id, 55)
+
+    def test_poll_commands_parses_add_stock(self) -> None:
+        self.responses.append(
+            {
+                "ok": True,
+                "result": [
+                    {
+                        "update_id": 56,
+                        "message": {
+                            "chat": {"id": 999},
+                            "from": {"username": "alice"},
+                            "text": 'add "NVDA"',
+                        },
+                    }
+                ],
+            }
+        )
+
+        results = self.service.poll_commands()
+
+        self.assertEqual(
+            results,
+            [TelegramCommand(kind="add_stock", chat_id=999, actor="alice", text='add "NVDA"', symbol="NVDA")],
+        )
+        self.assertEqual(self.service.last_update_id, 56)
+
+    def test_poll_commands_swallows_get_updates_errors(self) -> None:
+        self.service.http_get = lambda url: (_ for _ in ()).throw(TelegramApiError("Telegram getUpdates failed: timed out"))
+
+        results = self.service.poll_commands()
+
+        self.assertEqual(results, [])
+
+    def test_publish_signal_propagates_readable_api_error(self) -> None:
+        def fail_post(url: str, payload: dict) -> None:
+            raise TelegramApiError('Telegram sendMessage failed: HTTP 400 {"ok":false,"description":"Bad Request: chat not found"}')
+
+        service = TelegramApprovalService(
+            TelegramConfig(
+                bot_token="token",
+                chat_id="chat",
+                polling_timeout_seconds=2,
+                polling_limit=25,
+                drop_pending_updates_on_start=False,
+            ),
+            signal_expiry_minutes=60,
+            http_post=fail_post,
+            http_get=self._http_get,
+        )
+
+        with self.assertRaises(TelegramApiError) as ctx:
+            service.publish_signal(self.signal, self.proposal)
+
+        self.assertIn("chat not found", str(ctx.exception))
 
 
 if __name__ == "__main__":

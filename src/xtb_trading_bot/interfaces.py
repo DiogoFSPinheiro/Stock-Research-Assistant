@@ -10,6 +10,7 @@ from .domain import (
     PositionSnapshot,
     Signal,
     OrderProposal,
+    StockFundamentals,
 )
 
 
@@ -27,6 +28,9 @@ class MarketDataProvider(Protocol):
         ...
 
     def list_positions(self) -> list[PositionSnapshot]:
+        ...
+
+    def get_stock_fundamentals(self, symbol: str) -> StockFundamentals:
         ...
 
 

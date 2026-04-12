@@ -1,17 +1,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 import json
 from typing import Callable
-from urllib import parse, request
+from urllib import error, parse, request
 
 from .config import TelegramConfig
-from .domain import ApprovalDecision, ApprovalStatus, OrderProposal, PositionSnapshot, Signal
+from .domain import ApprovalDecision, OrderProposal, PositionSnapshot, Signal
 
 
 HttpPost = Callable[[str, dict], None]
 HttpGet = Callable[[str], dict]
+
+
+class TelegramApiError(RuntimeError):
+    pass
 
 
 @dataclass(frozen=True)
@@ -22,16 +26,42 @@ class TelegramUpdate:
     actor: str
 
 
+@dataclass(frozen=True)
+class TipRequest:
+    chat_id: str | int | None
+    actor: str
+    text: str
+
+
+@dataclass(frozen=True)
+class TelegramCommand:
+    kind: str
+    chat_id: str | int | None
+    actor: str
+    text: str
+    symbol: str | None = None
+
+
 def _default_post(url: str, payload: dict) -> None:
     data = json.dumps(payload).encode("utf-8")
     req = request.Request(url, data=data, headers={"Content-Type": "application/json"})
-    with request.urlopen(req, timeout=10):
-        return
+    try:
+        with request.urlopen(req, timeout=10):
+            return
+    except error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise TelegramApiError(f"Telegram sendMessage failed: HTTP {exc.code} {body}") from exc
 
 
 def _default_get(url: str) -> dict:
-    with request.urlopen(url, timeout=10) as response:
-        return json.loads(response.read().decode("utf-8"))
+    try:
+        with request.urlopen(url, timeout=60) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise TelegramApiError(f"Telegram getUpdates failed: HTTP {exc.code} {body}") from exc
+    except (TimeoutError, OSError, error.URLError) as exc:
+        raise TelegramApiError(f"Telegram getUpdates failed: {exc}") from exc
 
 
 @dataclass
@@ -41,7 +71,6 @@ class TelegramApprovalService:
     http_post: HttpPost = _default_post
     http_get: HttpGet = _default_get
     decisions: list[ApprovalDecision] = field(default_factory=list)
-    published_proposals: dict[str, datetime] = field(default_factory=dict)
     positions_provider: Callable[[], list[PositionSnapshot]] | None = None
     last_update_id: int | None = None
 
@@ -56,30 +85,31 @@ class TelegramApprovalService:
             {"chat_id": chat_id, "text": text},
         )
 
-    def _format_positions(self) -> str:
-        positions = self.list_positions()
-        if not positions:
-            return "No open positions."
-        return "\n".join(
-            f"{position.symbol} {position.side.value} qty={position.quantity} pnl={position.unrealized_pnl:.2f}"
-            for position in positions
-        )
+    def _resolve_chat_id(self, chat_id: str | int | None = None) -> str | int | None:
+        return chat_id if chat_id is not None else self.config.chat_id
 
-    def _format_pending(self) -> str:
-        if not self.published_proposals:
-            return "No pending proposals."
-        return "\n".join(sorted(self.published_proposals))
+    def _is_tip_request(self, text: str) -> bool:
+        normalized = " ".join(text.strip().lower().split())
+        command = normalized.split("@", 1)[0]
+        return command in {"/tip", "/give_a_tip", "tip", "give a tip"}
 
-    def _maybe_reply(self, chat_id: str | int | None, reply: bool, message: str) -> None:
-        if reply and chat_id is not None:
-            self._send_message(chat_id, message)
-
-    def _normalize_command(self, text: str) -> list[str]:
-        parts = text.strip().split()
-        if not parts:
-            return []
-        parts[0] = parts[0].split("@", 1)[0].lower()
-        return parts
+    def _parse_command(self, update: TelegramUpdate) -> TelegramCommand | None:
+        normalized = " ".join(update.text.strip().split())
+        lowered = normalized.lower().replace('"', "").replace("'", "")
+        first = lowered.split(" ", 1)[0].split("@", 1)[0]
+        if first in {"/tip", "/give_a_tip", "tip"} or lowered == "give a tip":
+            return TelegramCommand(kind="tip", chat_id=update.chat_id, actor=update.actor, text=update.text)
+        if first in {"/add", "add"}:
+            parts = normalized.replace('"', "").replace("'", "").split()
+            if len(parts) >= 2:
+                return TelegramCommand(
+                    kind="add_stock",
+                    chat_id=update.chat_id,
+                    actor=update.actor,
+                    text=update.text,
+                    symbol=parts[1].upper(),
+                )
+        return None
 
     def _parse_update(self, update: dict) -> TelegramUpdate | None:
         try:
@@ -102,20 +132,26 @@ class TelegramApprovalService:
         actor = str(username or from_user.get("first_name") or "telegram-user") if isinstance(from_user, dict) else "telegram-user"
         return TelegramUpdate(update_id=update_id, chat_id=chat_id, text=text, actor=actor)
 
-    def publish_signal(self, signal: Signal, proposal: OrderProposal) -> None:
-        self.published_proposals[proposal.proposal_id] = datetime.now(timezone.utc)
-        if not self.config.bot_token or not self.config.chat_id:
+    def publish_signal(self, signal: Signal, proposal: OrderProposal, chat_id: str | int | None = None) -> None:
+        target_chat_id = self._resolve_chat_id(chat_id)
+        if not self.config.bot_token or not target_chat_id:
             return
         text = (
-            f"Signal {signal.side.value} {signal.symbol} {signal.timeframe}\n"
-            f"Entry: {proposal.entry:.4f}\n"
-            f"Stop: {proposal.stop_loss:.4f}\n"
-            f"Target: {proposal.take_profit:.4f}\n"
-            f"Risk: {proposal.estimated_risk_amount:.2f}\n"
-            f"Proposal ID: {proposal.proposal_id}\n"
-            f"Use /approve {proposal.proposal_id} or /reject {proposal.proposal_id}"
+            f"Undervalued Stock Pick\n"
+            f"Ticker: {signal.symbol}\n"
+            f"Timeframe: {signal.timeframe}\n"
+            f"Entry Price: {proposal.entry:.4f}\n"
+            f"Exit Price: {proposal.take_profit:.4f}\n"
+            f"Confidence: {signal.confidence:.2f}\n"
+            f"Why: {signal.rationale}"
         )
-        self._send_message(self.config.chat_id, text)
+        self._send_message(target_chat_id, text)
+
+    def publish_text(self, text: str, chat_id: str | int | None = None) -> None:
+        target_chat_id = self._resolve_chat_id(chat_id)
+        if not self.config.bot_token or not target_chat_id:
+            return
+        self._send_message(target_chat_id, text)
 
     def initialize(self) -> None:
         if self.config.drop_pending_updates_on_start:
@@ -126,67 +162,14 @@ class TelegramApprovalService:
             return []
         return self.positions_provider()
 
-    def receive_command(
-        self,
-        command: str,
-        actor: str = "telegram-user",
-        chat_id: str | int | None = None,
-        reply: bool = False,
-    ) -> ApprovalDecision | str:
-        parts = self._normalize_command(command)
-        if not parts:
-            return "Empty command."
+    def poll_tip_requests(self) -> list[TipRequest]:
+        return [
+            TipRequest(chat_id=command.chat_id, actor=command.actor, text=command.text)
+            for command in self.poll_commands()
+            if command.kind == "tip"
+        ]
 
-        verb = parts[0].lower()
-        if verb == "/positions":
-            response: ApprovalDecision | str = self._format_positions()
-            self._maybe_reply(chat_id, reply, str(response))
-            return response
-        if verb == "/pending":
-            response = self._format_pending()
-            self._maybe_reply(chat_id, reply, response)
-            return response
-        if len(parts) < 2:
-            response = "Missing proposal id."
-            self._maybe_reply(chat_id, reply, response)
-            return response
-
-        proposal_id = parts[1]
-        published_at = self.published_proposals.get(proposal_id)
-        if published_at is None:
-            response = "Unknown proposal id."
-            self._maybe_reply(chat_id, reply, response)
-            return response
-        if datetime.now(timezone.utc) - published_at > timedelta(minutes=self.signal_expiry_minutes):
-            decision = ApprovalDecision(
-                proposal_id=proposal_id,
-                status=ApprovalStatus.EXPIRED,
-                actor=actor,
-                note="Proposal expired.",
-            )
-            self.decisions.append(decision)
-            self.published_proposals.pop(proposal_id, None)
-            self._maybe_reply(chat_id, reply, "Proposal expired.")
-            return decision
-
-        if verb == "/approve":
-            status = ApprovalStatus.APPROVED
-            response_text = f"Approved proposal {proposal_id}."
-        elif verb == "/reject":
-            status = ApprovalStatus.REJECTED
-            response_text = f"Rejected proposal {proposal_id}."
-        else:
-            response = "Unsupported command."
-            self._maybe_reply(chat_id, reply, response)
-            return response
-
-        decision = ApprovalDecision(proposal_id=proposal_id, status=status, actor=actor)
-        self.decisions.append(decision)
-        self.published_proposals.pop(proposal_id, None)
-        self._maybe_reply(chat_id, reply, response_text)
-        return decision
-
-    def poll_updates(self, reply: bool = False) -> list[ApprovalDecision | str]:
+    def poll_commands(self) -> list[TelegramCommand]:
         if not self.config.bot_token:
             return []
 
@@ -197,7 +180,10 @@ class TelegramApprovalService:
         if self.last_update_id is not None:
             params["offset"] = str(self.last_update_id + 1)
 
-        payload = self.http_get(f"{self._bot_api_url('getUpdates')}?{parse.urlencode(params)}")
+        try:
+            payload = self.http_get(f"{self._bot_api_url('getUpdates')}?{parse.urlencode(params)}")
+        except TelegramApiError:
+            return []
         if not isinstance(payload, dict):
             return []
 
@@ -205,7 +191,7 @@ class TelegramApprovalService:
         if not isinstance(results, list):
             return []
 
-        processed: list[ApprovalDecision | str] = []
+        commands: list[TelegramCommand] = []
         for raw_update in results:
             if not isinstance(raw_update, dict):
                 continue
@@ -213,17 +199,14 @@ class TelegramApprovalService:
             if update is None:
                 continue
             self.last_update_id = update.update_id if self.last_update_id is None else max(self.last_update_id, update.update_id)
-            if not update.text.strip().startswith("/"):
-                continue
-            processed.append(
-                self.receive_command(
-                    update.text,
-                    actor=update.actor,
-                    chat_id=update.chat_id,
-                    reply=reply,
-                )
-            )
-        return processed
+            command = self._parse_command(update)
+            if command is not None:
+                commands.append(command)
+        return commands
+
+    def poll_updates(self, reply: bool = False) -> list[ApprovalDecision | str]:
+        self.poll_commands()
+        return []
 
     def get_pending_decisions(self) -> list[ApprovalDecision]:
         decisions, self.decisions = self.decisions[:], []

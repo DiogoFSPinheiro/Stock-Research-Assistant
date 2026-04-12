@@ -113,3 +113,21 @@ class ContextSnapshot:
 class PerformanceSnapshot:
     daily_pnl: float
     weekly_pnl: float
+
+
+@dataclass(frozen=True)
+class StockFundamentals:
+    symbol: str
+    current_price: float
+    market_cap: float | None
+    trailing_pe: float | None
+    forward_pe: float | None
+    price_to_book: float | None
+    peg_ratio: float | None
+    profit_margin: float | None
+    operating_margin: float | None
+    return_on_equity: float | None
+    revenue_growth: float | None
+    earnings_growth: float | None
+    debt_to_equity: float | None
+    target_mean_price: float | None

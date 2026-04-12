@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from hashlib import sha1
 from statistics import mean
 
-from .domain import AssetClass, Candle, ContextSnapshot, Instrument, Signal, SignalSide
+from .domain import AssetClass, Candle, ContextSnapshot, Instrument, Signal, SignalSide, StockFundamentals
 from .interfaces import StateStore
 
 
@@ -31,11 +31,26 @@ def _atr(candles: list[Candle], length: int = 14) -> float:
     return mean(sample) if sample else 0.0
 
 
+def _bounded_score(value: float | None, low: float, high: float, inverse: bool = False) -> float:
+    if value is None:
+        return 0.5
+    if inverse:
+        if value <= low:
+            return 1.0
+        if value >= high:
+            return 0.0
+        return 1 - ((value - low) / (high - low))
+    if value <= low:
+        return 0.0
+    if value >= high:
+        return 1.0
+    return (value - low) / (high - low)
+
+
 @dataclass
-class TrendSignalEngine:
+class UndervaluedStockEngine:
     state_store: StateStore
-    minimum_confidence: float = 0.55
-    volatility_floor: float = 0.002
+    minimum_confidence: float = 0.60
 
     def evaluate(
         self,
@@ -43,65 +58,82 @@ class TrendSignalEngine:
         timeframe: str,
         candles: list[Candle],
         context: list[ContextSnapshot],
+        fundamentals: StockFundamentals,
+        allow_repeat: bool = False,
     ) -> Signal:
-        if len(candles) < 30:
-            return self._no_trade(instrument, timeframe, "Not enough candles for evaluation.")
+        if instrument.asset_class != AssetClass.STOCK:
+            return self._no_trade(instrument, timeframe, "Only stocks are evaluated for undervaluation.")
+        if len(candles) < 60:
+            return self._no_trade(instrument, timeframe, "Not enough candles for valuation overlay.")
 
         closes = [candle.close for candle in candles]
-        fast = _ema(closes[-20:], min(8, len(closes[-20:])))
-        slow = _ema(closes[-30:], min(21, len(closes[-30:])))
         current = closes[-1]
-        previous = closes[-2]
-        atr_ratio = _atr(candles) / current if current else 0.0
-        momentum = (current - previous) / previous if previous else 0.0
+        ema_20 = _ema(closes[-20:], 8)
+        ema_50 = _ema(closes[-50:], 21)
+        atr = _atr(candles)
         context_score = mean(snapshot.trend_score for snapshot in context) if context else 0.0
         risk_on = all(snapshot.risk_on for snapshot in context) if context else True
 
-        if atr_ratio < self.volatility_floor:
-            return self._no_trade(instrument, timeframe, "Volatility below floor.")
-        if not risk_on:
-            return self._no_trade(instrument, timeframe, "Context filter is risk-off.")
+        discount_to_target = None
+        if fundamentals.target_mean_price and current:
+            discount_to_target = (fundamentals.target_mean_price - current) / current
 
-        side = SignalSide.NO_TRADE
-        if current > slow and fast > slow and momentum > 0 and context_score >= -0.2:
-            side = SignalSide.BUY
-        elif instrument.asset_class == AssetClass.FX and current < slow and fast < slow and momentum < 0 and context_score <= 0.2:
-            side = SignalSide.SELL
-
-        if side == SignalSide.NO_TRADE:
-            return self._no_trade(instrument, timeframe, "Trend filters are not aligned.")
-
-        if self.state_store.has_recent_signal(instrument.symbol, timeframe, side.value):
-            return self._no_trade(instrument, timeframe, "Duplicate signal suppressed.")
-
-        confidence = min(
-            0.95,
-            0.5 + abs((fast - slow) / slow) * 10 + abs(momentum) * 15 + max(context_score, 0) * 0.1,
+        valuation_score = mean(
+            [
+                _bounded_score(fundamentals.forward_pe, 8, 22, inverse=True),
+                _bounded_score(fundamentals.trailing_pe, 10, 24, inverse=True),
+                _bounded_score(fundamentals.price_to_book, 1, 6, inverse=True),
+                _bounded_score(fundamentals.peg_ratio, 0.5, 2.0, inverse=True),
+                _bounded_score(fundamentals.profit_margin, 0.05, 0.25),
+                _bounded_score(fundamentals.return_on_equity, 0.08, 0.25),
+                _bounded_score(fundamentals.revenue_growth, 0.02, 0.15),
+                _bounded_score(fundamentals.earnings_growth, 0.02, 0.18),
+                _bounded_score(fundamentals.debt_to_equity, 20, 180, inverse=True),
+                _bounded_score(discount_to_target, 0.05, 0.25),
+            ]
         )
+        technical_score = mean(
+            [
+                1.0 if current >= ema_20 else 0.2,
+                1.0 if ema_20 >= ema_50 else 0.3,
+                _bounded_score((current - ema_50) / ema_50 if ema_50 else 0.0, -0.05, 0.15),
+                _bounded_score(context_score, -0.2, 0.2),
+            ]
+        )
+        confidence = round(valuation_score * 0.65 + technical_score * 0.35, 4)
+
+        if not risk_on:
+            return self._no_trade(instrument, timeframe, "Market context is risk-off.")
         if confidence < self.minimum_confidence:
-            return self._no_trade(instrument, timeframe, "Confidence below threshold.")
+            return self._no_trade(
+                instrument,
+                timeframe,
+                f"Undervaluation score too weak ({confidence:.2f}); valuation={valuation_score:.2f}, technical={technical_score:.2f}.",
+            )
+        if not allow_repeat and self.state_store.has_recent_signal(instrument.symbol, timeframe, SignalSide.BUY.value):
+            return self._no_trade(instrument, timeframe, "Duplicate stock pick suppressed.")
 
-        stop_distance = max(_atr(candles) * 1.5, current * 0.005)
-        if side == SignalSide.BUY:
-            stop_loss = current - stop_distance
-            take_profit = current + stop_distance * 2
-        else:
-            stop_loss = current + stop_distance
-            take_profit = current - stop_distance * 2
+        stop_distance = max(atr * 1.2, current * 0.06)
+        entry = round(min(current, ema_20 * 1.01), 4)
+        stop_loss = round(entry - stop_distance, 4)
+        target_base = fundamentals.target_mean_price if fundamentals.target_mean_price else entry + stop_distance * 2.2
+        take_profit = round(max(target_base, entry + stop_distance * 1.8), 4)
 
-        digest = sha1(f"{instrument.symbol}:{timeframe}:{side.value}:{current}".encode("utf-8")).hexdigest()[:12]
+        digest = sha1(f"{instrument.symbol}:{timeframe}:BUY:{entry}:{take_profit}".encode("utf-8")).hexdigest()[:12]
+        rationale = (
+            f"Undervalued stock candidate: valuation={valuation_score:.2f}, technical={technical_score:.2f}, "
+            f"forwardPE={_fmt(fundamentals.forward_pe)}, P/B={_fmt(fundamentals.price_to_book)}, "
+            f"ROE={_fmt_pct(fundamentals.return_on_equity)}, targetGap={_fmt_pct(discount_to_target)}"
+        )
         return Signal(
             signal_id=digest,
             symbol=instrument.symbol,
             asset_class=instrument.asset_class,
-            side=side,
+            side=SignalSide.BUY,
             timeframe=timeframe,
             confidence=confidence,
-            rationale=(
-                f"Trend aligned on {timeframe}; fast EMA={fast:.4f}, slow EMA={slow:.4f}, "
-                f"momentum={momentum:.4%}, context={context_score:.2f}"
-            ),
-            entry=current,
+            rationale=rationale,
+            entry=entry,
             stop_loss=stop_loss,
             take_profit=take_profit,
         )
@@ -120,3 +152,11 @@ class TrendSignalEngine:
             stop_loss=None,
             take_profit=None,
         )
+
+
+def _fmt(value: float | None) -> str:
+    return "n/a" if value is None else f"{value:.2f}"
+
+
+def _fmt_pct(value: float | None) -> str:
+    return "n/a" if value is None else f"{value:.1%}"
