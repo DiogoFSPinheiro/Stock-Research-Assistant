@@ -99,9 +99,9 @@ class TradingBot:
     def _candidate_rank(self, item: tuple[object, object]) -> tuple[float, float, float]:
         signal, _proposal = item
         return (
+            getattr(signal, "margin_of_safety", None) or float("-inf"),
+            getattr(signal, "quality_score", None) or float("-inf"),
             getattr(signal, "normalized_score", None) or float("-inf"),
-            getattr(signal, "probability_positive", None) or float("-inf"),
-            getattr(signal, "confidence", 0.0),
         )
 
     def _select_best_candidate(
@@ -165,22 +165,28 @@ class TradingBot:
         candidates = self.list_top_candidates(limit=limit, allow_repeat=True)
         if not candidates:
             try:
-                self.approvals.publish_text("TOP TIPS TODAY\nNo strong stock setups right now.", chat_id=chat_id)
+                self.approvals.publish_text("TOP QUALITY-VALUE IDEAS\nNo stocks passed the quality-value screen right now.", chat_id=chat_id)
             except TelegramApiError as exc:
                 self.logger.warning("Telegram publish failed for top tips response: %s", exc)
                 return 0
             return 0
 
-        lines = ["TOP TIPS TODAY", ""]
+        lines = ["TOP QUALITY-VALUE IDEAS", ""]
         for index, (signal, _proposal) in enumerate(candidates, start=1):
             lines.extend(
                 [
                     f"{index}. {signal.symbol}",
                     f"Best horizon: {self._format_horizon(signal)}",
+                    f"Entry price: {self._format_price(getattr(signal, 'entry', None))}",
+                    f"Fair value: {self._format_price(getattr(signal, 'fair_value', None))}",
+                    f"Margin of safety: {self._format_pct(getattr(signal, 'margin_of_safety', None))}",
+                    f"Quality score: {self._format_score(getattr(signal, 'quality_score', None))}",
+                    f"Timing score: {self._format_score(getattr(signal, 'timing_score', None))}",
                     f"Expected return: {self._format_pct(signal.expected_return)}",
                     f"Confidence: {signal.confidence:.0%}",
                     f"Probability up: {self._format_pct(signal.probability_positive)}",
                     f"Adjusted score/day: {self._format_pct(signal.normalized_score)}",
+                    f"Risks: {self._format_risks(getattr(signal, 'risk_flags', ())) }",
                     f"Why: {signal.rationale}",
                     "",
                 ]
@@ -193,6 +199,8 @@ class TradingBot:
         return len(candidates)
 
     def scan(self) -> int:
+        if hasattr(self.approvals, "publish_text"):
+            return self.send_top_tips(limit=3)
         return self.send_tip()
 
     def process_approvals(self) -> int:
@@ -218,3 +226,12 @@ class TradingBot:
 
     def _format_pct(self, value: float | None) -> str:
         return "n/a" if value is None else f"{value:.1%}"
+
+    def _format_price(self, value: float | None) -> str:
+        return "n/a" if value is None else f"{value:.2f}"
+
+    def _format_score(self, value: float | None) -> str:
+        return "n/a" if value is None else f"{value:.2f}"
+
+    def _format_risks(self, flags: tuple[str, ...] | list[str]) -> str:
+        return "none flagged" if not flags else ", ".join(str(flag) for flag in flags)

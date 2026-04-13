@@ -201,6 +201,8 @@ class SyntheticMarketDataProvider:
             symbol=symbol,
             current_price=current_price,
             market_cap=200_000_000_000,
+            shares_outstanding=5_000_000_000,
+            sector="Technology",
             trailing_pe=18.0,
             forward_pe=16.0,
             price_to_book=3.2,
@@ -211,6 +213,10 @@ class SyntheticMarketDataProvider:
             revenue_growth=0.11,
             earnings_growth=0.14,
             debt_to_equity=45.0,
+            earnings_yield=1 / 18.0,
+            free_cash_flow_yield=0.055,
+            fcf_margin=0.16,
+            net_debt_to_ebit=1.1,
             target_mean_price=current_price * 1.18,
         )
 
@@ -414,6 +420,8 @@ class YFinanceMarketDataProvider:
             symbol=symbol,
             current_price=current_price,
             market_cap=_optional_float(info.get("marketCap")),
+            shares_outstanding=_optional_float(info.get("sharesOutstanding")),
+            sector=_optional_str(info.get("sector")),
             trailing_pe=_optional_float(info.get("trailingPE")),
             forward_pe=_optional_float(info.get("forwardPE")),
             price_to_book=_optional_float(info.get("priceToBook")),
@@ -424,6 +432,10 @@ class YFinanceMarketDataProvider:
             revenue_growth=_optional_float(info.get("revenueGrowth")),
             earnings_growth=_optional_float(info.get("earningsGrowth")),
             debt_to_equity=_optional_float(info.get("debtToEquity")),
+            earnings_yield=self._compute_earnings_yield(info),
+            free_cash_flow_yield=self._compute_fcf_yield(info),
+            fcf_margin=self._compute_fcf_margin(info),
+            net_debt_to_ebit=self._compute_net_debt_to_ebit(info),
             target_mean_price=_optional_float(info.get("targetMeanPrice")),
         )
         self.fundamentals_cache[symbol] = (time.monotonic(), fundamentals)
@@ -523,6 +535,40 @@ class YFinanceMarketDataProvider:
         self.ticker_cache[provider_symbol] = ticker
         return ticker
 
+    def _compute_earnings_yield(self, info: dict[str, Any]) -> float | None:
+        trailing_pe = _optional_float(info.get("trailingPE"))
+        if trailing_pe is not None and trailing_pe > 0:
+            return 1 / trailing_pe
+        forward_pe = _optional_float(info.get("forwardPE"))
+        if forward_pe is not None and forward_pe > 0:
+            return 1 / forward_pe
+        return None
+
+    def _compute_fcf_yield(self, info: dict[str, Any]) -> float | None:
+        market_cap = _optional_float(info.get("marketCap"))
+        free_cash_flow = _optional_float(info.get("freeCashflow"))
+        enterprise_value = _optional_float(info.get("enterpriseValue"))
+        denominator = enterprise_value if enterprise_value and enterprise_value > 0 else market_cap
+        if free_cash_flow is None or denominator is None or denominator <= 0:
+            return None
+        return free_cash_flow / denominator
+
+    def _compute_fcf_margin(self, info: dict[str, Any]) -> float | None:
+        free_cash_flow = _optional_float(info.get("freeCashflow"))
+        total_revenue = _optional_float(info.get("totalRevenue"))
+        if free_cash_flow is None or total_revenue is None or total_revenue <= 0:
+            return None
+        return free_cash_flow / total_revenue
+
+    def _compute_net_debt_to_ebit(self, info: dict[str, Any]) -> float | None:
+        total_debt = _optional_float(info.get("totalDebt"))
+        cash = _optional_float(info.get("totalCash"))
+        ebitda = _optional_float(info.get("ebitda"))
+        if total_debt is None or ebitda is None or ebitda <= 0:
+            return None
+        net_debt = total_debt - (cash or 0.0)
+        return net_debt / ebitda
+
 
 def _optional_float(value: Any) -> float | None:
     if value is None:
@@ -531,6 +577,13 @@ def _optional_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _optional_str(value: Any) -> str | None:
+    if value is None:
+        return None
+    result = str(value).strip()
+    return result or None
 
 
 def build_market_data_provider(

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from hashlib import sha1
 import math
 from statistics import mean
 
 from .domain import AssetClass, Candle, ContextSnapshot, Instrument, Signal, SignalSide, StockFundamentals
 from .interfaces import StateStore
+from .valuation import compute_fair_value
 
 
 def _ema(values: list[float], length: int) -> float:
@@ -32,29 +33,15 @@ def _atr(candles: list[Candle], length: int = 14) -> float:
     return mean(sample) if sample else 0.0
 
 
-def _bounded_score(value: float | None, low: float, high: float, inverse: bool = False) -> float:
-    if value is None:
-        return 0.5
-    if inverse:
-        if value <= low:
-            return 1.0
-        if value >= high:
-            return 0.0
-        return 1 - ((value - low) / (high - low))
-    if value <= low:
-        return 0.0
-    if value >= high:
-        return 1.0
-    return (value - low) / (high - low)
-
-
 @dataclass
 class UndervaluedStockEngine:
     state_store: StateStore
-    minimum_confidence: float = 0.60
+    minimum_confidence: float = 0.45
     minimum_probability_positive: float = 0.50
     uncertainty_penalty: float = 0.45
     horizon_days: tuple[int, ...] = (1, 5, 21, 126)
+    minimum_margin_of_safety: float = 0.10
+    minimum_quality_score: float = 0.45
 
     def evaluate(
         self,
@@ -83,34 +70,28 @@ class UndervaluedStockEngine:
         realized_volatility = math.sqrt(mean([value * value for value in daily_returns[-20:]]) or 0.0) if daily_returns else 0.0
         context_score = mean(snapshot.trend_score for snapshot in context) if context else 0.0
         risk_on = all(snapshot.risk_on for snapshot in context) if context else True
-
+        live_fundamentals = replace(fundamentals, current_price=current)
+        valuation = compute_fair_value(live_fundamentals)
         discount_to_target = None
         if fundamentals.target_mean_price and current:
             discount_to_target = (fundamentals.target_mean_price - current) / current
-
-        valuation_score = mean(
+        price_vs_ema50 = (current - ema_50) / ema_50 if ema_50 else 0.0
+        price_vs_ema20 = (current - ema_20) / ema_20 if ema_20 else 0.0
+        timing_score = mean(
             [
-                _bounded_score(fundamentals.forward_pe, 8, 22, inverse=True),
-                _bounded_score(fundamentals.trailing_pe, 10, 24, inverse=True),
-                _bounded_score(fundamentals.price_to_book, 1, 6, inverse=True),
-                _bounded_score(fundamentals.peg_ratio, 0.5, 2.0, inverse=True),
-                _bounded_score(fundamentals.profit_margin, 0.05, 0.25),
-                _bounded_score(fundamentals.return_on_equity, 0.08, 0.25),
-                _bounded_score(fundamentals.revenue_growth, 0.02, 0.15),
-                _bounded_score(fundamentals.earnings_growth, 0.02, 0.18),
-                _bounded_score(fundamentals.debt_to_equity, 20, 180, inverse=True),
-                _bounded_score(discount_to_target, 0.05, 0.25),
+                1.0 if current >= ema_20 else 0.3,
+                1.0 if ema_20 >= ema_50 else 0.35,
+                max(0.0, min(1.0, (price_vs_ema50 + 0.08) / 0.18)),
+                max(0.0, min(1.0, (price_vs_ema20 + 0.05) / 0.12)),
+                max(0.0, min(1.0, (context_score + 0.15) / 0.30)),
             ]
         )
-        technical_score = mean(
-            [
-                1.0 if current >= ema_20 else 0.2,
-                1.0 if ema_20 >= ema_50 else 0.3,
-                _bounded_score((current - ema_50) / ema_50 if ema_50 else 0.0, -0.05, 0.15),
-                _bounded_score(context_score, -0.2, 0.2),
-            ]
+        confidence = round(
+            max(0.0, min(0.99, (valuation.margin_of_safety or 0.0) * 1.4)) * 0.5
+            + valuation.quality_score * 0.35
+            + timing_score * 0.15,
+            4,
         )
-        confidence = round(valuation_score * 0.65 + technical_score * 0.35, 4)
         trend_gap = abs(ema_20 - ema_50) / ema_50 if ema_50 else 0.0
         short_momentum = (current - closes[-6]) / closes[-6] if len(closes) >= 6 and closes[-6] else 0.0
         medium_momentum = (current - closes[-22]) / closes[-22] if len(closes) >= 22 and closes[-22] else short_momentum
@@ -118,34 +99,62 @@ class UndervaluedStockEngine:
 
         if not risk_on:
             return self._no_trade(instrument, timeframe, "Market context is risk-off.")
+        if fundamentals.earnings_yield is None and fundamentals.free_cash_flow_yield is None:
+            return self._no_trade(instrument, timeframe, "Missing core valuation inputs for fair value.")
+        if fundamentals.profit_margin is None or fundamentals.operating_margin is None or fundamentals.return_on_equity is None:
+            return self._no_trade(instrument, timeframe, "Missing core quality inputs for fair value.")
+        if fundamentals.profit_margin < 0 or fundamentals.operating_margin < 0:
+            return self._no_trade(instrument, timeframe, "Profitability is negative, which fails the quality screen.")
+        if fundamentals.net_debt_to_ebit is not None and fundamentals.net_debt_to_ebit > 4.0:
+            return self._no_trade(instrument, timeframe, "Leverage is too high for the quality-value model.")
+        if fundamentals.debt_to_equity is not None and fundamentals.debt_to_equity > 180:
+            return self._no_trade(instrument, timeframe, "Debt-to-equity is too high for the quality-value model.")
+        if valuation.margin_of_safety is None:
+            return self._no_trade(instrument, timeframe, "Fair value could not be estimated with enough confidence.")
+        if valuation.margin_of_safety < self.minimum_margin_of_safety:
+            return self._no_trade(
+                instrument,
+                timeframe,
+                f"Upside after fair-value adjustments is too small ({valuation.margin_of_safety:.1%}).",
+            )
+        if valuation.quality_score < self.minimum_quality_score:
+            return self._no_trade(
+                instrument,
+                timeframe,
+                f"Business quality score is too weak ({valuation.quality_score:.2f}) for a value pick.",
+            )
         if confidence < self.minimum_confidence:
             return self._no_trade(
                 instrument,
                 timeframe,
-                f"Undervaluation score too weak ({confidence:.2f}); valuation={valuation_score:.2f}, technical={technical_score:.2f}.",
+                f"Overall conviction too weak ({confidence:.2f}); margin={valuation.margin_of_safety:.1%}, quality={valuation.quality_score:.2f}, timing={timing_score:.2f}.",
             )
         if not allow_repeat and self.state_store.has_recent_signal(instrument.symbol, timeframe, SignalSide.BUY.value):
             return self._no_trade(instrument, timeframe, "Duplicate stock pick suppressed.")
 
         horizon_signals: list[Signal] = []
-        base_target_gap = discount_to_target or 0.0
+        base_target_gap = valuation.margin_of_safety or discount_to_target or 0.0
         for horizon_days in self.horizon_days:
             horizon_label = self._horizon_label(horizon_days)
             momentum_weight = min(1.0, horizon_days / 21)
-            target_weight = 1.0 - (0.35 * momentum_weight)
+            target_weight = 0.85 - (0.20 * momentum_weight)
             momentum_signal = mean(
                 [
-                    short_momentum,
-                    medium_momentum * min(1.0, horizon_days / 21),
-                    long_momentum * min(1.0, horizon_days / 126),
+                    short_momentum * 0.8,
+                    medium_momentum * min(1.0, horizon_days / 21) * 0.9,
+                    long_momentum * min(1.0, horizon_days / 126) * 0.5,
                     context_score,
                 ]
             )
             expected_return = max(
-                -0.25,
+                -0.15,
                 min(
-                    0.35,
-                    (base_target_gap * target_weight) + (momentum_signal * 0.55) + ((confidence - 0.5) * 0.10),
+                    0.45,
+                    (base_target_gap * target_weight)
+                    + (momentum_signal * 0.20)
+                    + (valuation.quality_score * 0.08)
+                    + (timing_score * 0.05)
+                    + ((confidence - 0.5) * 0.08),
                 ),
             )
             horizon_uncertainty = max(
@@ -155,14 +164,17 @@ class UndervaluedStockEngine:
                 + ((1 - confidence) * 0.08),
             )
             adjusted_return = expected_return - (self.uncertainty_penalty * horizon_uncertainty)
-            normalized_score = adjusted_return / horizon_days
+            normalized_score = (adjusted_return / horizon_days) + ((valuation.margin_of_safety or 0.0) * 0.02)
             probability_positive = _normal_cdf(expected_return / horizon_uncertainty) if horizon_uncertainty else 1.0
             buy_confidence = max(0.0, min(0.99, confidence * probability_positive))
             if adjusted_return <= 0 or probability_positive < self.minimum_probability_positive:
                 continue
 
             entry = round(min(current, ema_20 * 1.01), 4)
-            target_price = current * (1 + expected_return)
+            target_price = min(
+                (valuation.fair_value or current * (1 + expected_return)),
+                current * (1 + expected_return * 1.15),
+            )
             stop_distance = max(atr * 1.2, current * (0.02 + (horizon_uncertainty * 0.5)))
             stop_loss = round(entry - stop_distance, 4)
             take_profit = round(max(target_price, entry + stop_distance * 1.8), 4)
@@ -170,10 +182,10 @@ class UndervaluedStockEngine:
                 f"{instrument.symbol}:{timeframe}:{horizon_days}:BUY:{entry}:{take_profit}".encode("utf-8")
             ).hexdigest()[:12]
             rationale = (
-                f"Best horizon {horizon_label}: expected={expected_return:.1%}, adjusted={adjusted_return:.1%}, "
-                f"probUp={probability_positive:.0%}, valuation={valuation_score:.2f}, technical={technical_score:.2f}, "
-                f"forwardPE={_fmt(fundamentals.forward_pe)}, P/B={_fmt(fundamentals.price_to_book)}, "
-                f"ROE={_fmt_pct(fundamentals.return_on_equity)}, targetGap={_fmt_pct(discount_to_target)}"
+                f"Best horizon {horizon_label}: price={current:.2f}, fairValue={_fmt(valuation.fair_value)}, "
+                f"margin={_fmt_pct(valuation.margin_of_safety)}, quality={valuation.quality_score:.2f}, "
+                f"timing={timing_score:.2f}, expected={expected_return:.1%}, why={valuation.primary_reason}, "
+                f"risk={valuation.primary_risk}"
             )
             horizon_signals.append(
                 Signal(
@@ -193,6 +205,11 @@ class UndervaluedStockEngine:
                     uncertainty=round(horizon_uncertainty, 6),
                     probability_positive=round(probability_positive, 6),
                     horizon_days=horizon_days,
+                    fair_value=valuation.fair_value,
+                    margin_of_safety=valuation.margin_of_safety,
+                    quality_score=valuation.quality_score,
+                    timing_score=round(timing_score, 4),
+                    risk_flags=valuation.risk_flags,
                 )
             )
 
@@ -207,6 +224,8 @@ class UndervaluedStockEngine:
             horizon_signals,
             key=lambda signal: (
                 signal.normalized_score if signal.normalized_score is not None else float("-inf"),
+                signal.margin_of_safety if signal.margin_of_safety is not None else float("-inf"),
+                signal.quality_score if signal.quality_score is not None else float("-inf"),
                 signal.probability_positive if signal.probability_positive is not None else float("-inf"),
                 signal.confidence,
             ),

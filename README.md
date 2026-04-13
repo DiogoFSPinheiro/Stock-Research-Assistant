@@ -1,23 +1,27 @@
 # Trading Bot
 
-Local Python bot that scans a stock universe from a file, ranks undervalued candidates using fundamentals plus price structure, and sends the single best stock pick to Telegram with ticker, entry price, and exit price.
+Local Python bot that scans a stock universe from a file, estimates fair value using quality-plus-valuation heuristics, ranks the best candidates, and sends a Telegram shortlist of stocks that look undervalued without falling into obvious value traps.
 
 ## Features
 
-- Stock-only undervaluation picker with one best idea per cycle
-- Fundamental ranking using valuation and quality metrics
-- Technical overlay for entry and exit price calculation
-- Telegram delivery with clean ticker/entry/exit messages
-- On-demand Telegram tip requests with `/tip` or `give a tip`
+- Stock-only quality-value screener with a ranked top-3 shortlist per scheduled cycle
+- Fair value model using earnings yield, free-cash-flow yield, margins, growth, and leverage
+- Hard rejection filters for missing core valuation data, weak profitability, and excessive leverage
+- Technical overlay used for timing and entry confirmation instead of defining undervaluation
+- Telegram delivery with fair value, margin of safety, quality score, timing score, and risk flags
+- On-demand Telegram tip requests with `/tip`, `/tip MSFT`, `/top 3`, or `give a tip`
 - Runtime stock universe updates without restarting the bot
 - JSON persistence for picks and analysis history
-- Unit test suite covering filters, ranking logic, Telegram flow, and orchestration
+- Unit test suite covering valuation math, filters, ranking logic, Telegram flow, and orchestration
 
 ## Runtime Expectations
 
 - The bot is designed to run locally as a background process.
-- Telegram is the primary user interface for receiving the best stock pick.
-- Send `/tip` in Telegram whenever you want an immediate fresh scan without waiting for the next scheduled cycle.
+- Telegram is the primary user interface for receiving the shortlist and single-name ideas.
+- The default scheduled scan sends the top 3 quality-value ideas instead of one forced pick.
+- Send `/tip` in Telegram whenever you want an immediate fresh single-stock idea without waiting for the next scheduled cycle.
+- Send `/tip MSFT` to force a fresh analysis for one ticker.
+- Send `/top 3` to request a ranked shortlist on demand.
 - Send `add NVDA` or `/add NVDA` in Telegram to append a stock to the universe file and use it on the next scan.
 - Market data is required for stocks; the project does not execute trades.
 - The code is designed to use `yfinance` by default for market data, so you can run it without a paid API key.
@@ -59,16 +63,29 @@ Start the bot with the installed console script:
 xtb-trading-bot
 ```
 
+If the console script is not available in your shell, run it directly from the project virtualenv:
+
+```powershell
+.\.venv\Scripts\python.exe -m xtb_trading_bot
+```
+
 If you prefer module execution after installation, this also works:
 
 ```powershell
 python -m xtb_trading_bot
 ```
 
+Once the bot is running, open Telegram and use:
+
+- `/top 3` for the ranked shortlist
+- `/tip` for one best current idea
+- `/tip MSFT` for a single-ticker check
+- `/add NVDA` to add a stock to the universe
+
 ## Configuration
 
 - `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are required for delivery.
-- Use `/tip` or send `give a tip` in Telegram to trigger an immediate extra stock scan.
+- Use `/tip`, `/tip SYMBOL`, or `/top N` in Telegram to trigger immediate scans.
 - You can edit the stock universe file while the bot is running; it reloads the file automatically before scans.
 - `MARKET_DATA_PROVIDER=yfinance` is the default live-data path; `synthetic` is still available for local dry runs.
 - `BOT_ALLOWED_STOCKS` defines the stock universe the picker will rank.
@@ -76,3 +93,15 @@ python -m xtb_trading_bot
 - `BOT_CONTEXT_SYMBOLS` is optional and can be used for market regime context only.
 - `BOT_ALLOWED_FX` is no longer used by the default runtime flow.
 - `XTB_*` variables are deprecated placeholders and should not be used.
+
+## Output
+
+Each shortlisted stock now includes:
+
+- entry price
+- estimated fair value
+- margin of safety
+- quality score
+- timing score
+- expected return and probability up
+- risk flags and a short rationale

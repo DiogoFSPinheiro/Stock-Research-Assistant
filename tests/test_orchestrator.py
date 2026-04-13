@@ -20,8 +20,19 @@ class RichSyntheticMarketDataProvider(SyntheticMarketDataProvider):
     def get_stock_fundamentals(self, symbol: str) -> StockFundamentals:
         current = self.get_quote(symbol)
         if symbol == "AAPL":
-            return StockFundamentals(symbol, current, 2.5e12, 28, 24, 9.0, 2.4, 0.22, 0.28, 1.4, 0.03, 0.04, 110, current * 1.05)
-        return StockFundamentals(symbol, current, 1.8e12, 18, 15, 3.4, 1.1, 0.24, 0.27, 0.22, 0.12, 0.15, 40, current * 1.20)
+            return StockFundamentals(
+                symbol, current, 2.5e12, 15.0e9, "Technology", 28, 24, 9.0, 2.4, 0.22, 0.28, 1.4, 0.03, 0.04, 110,
+                1 / 28.0, 0.028, 0.09, 2.8, current * 1.05
+            )
+        if symbol == "MSFT":
+            return StockFundamentals(
+                symbol, current, 1.8e12, 7.4e9, "Technology", 18, 15, 3.4, 1.1, 0.24, 0.27, 0.22, 0.12, 0.15, 40,
+                1 / 18.0, 0.060, 0.20, 1.1, current * 1.25
+            )
+        return StockFundamentals(
+            symbol, current, 8.0e11, 6.0e9, "Technology", 20, 17, 4.5, 1.6, 0.18, 0.22, 0.16, 0.08, 0.10, 65,
+            1 / 20.0, 0.045, 0.14, 1.6, current * 1.18
+        )
 
 
 class TradingBotTests(unittest.TestCase):
@@ -70,13 +81,12 @@ class TradingBotTests(unittest.TestCase):
         if self.universe_path.exists():
             self.universe_path.unlink()
 
-    def test_scan_publishes_single_best_stock_pick(self) -> None:
+    def test_scan_publishes_ranked_shortlist_by_default(self) -> None:
         generated = self.bot.scan()
 
         self.assertEqual(generated, 1)
         proposals = self.state_store.list_pending_proposals()
-        self.assertEqual(len(proposals), 1)
-        self.assertEqual(proposals[0].symbol, "MSFT")
+        self.assertEqual(len(proposals), 0)
 
     def test_signal_only_updates_are_ignored(self) -> None:
         self.approvals.http_get = lambda url: {
@@ -123,8 +133,54 @@ class TradingBotTests(unittest.TestCase):
 
         self.assertGreaterEqual(generated, 1)
         self.assertEqual(len(sent_messages), 1)
-        self.assertIn("TOP TIPS TODAY", sent_messages[0])
+        self.assertIn("TOP QUALITY-VALUE IDEAS", sent_messages[0])
         self.assertIn("1.", sent_messages[0])
+        self.assertIn("Margin of safety:", sent_messages[0])
+        self.assertIn("Quality score:", sent_messages[0])
+
+    def test_list_top_candidates_ranks_by_margin_of_safety_first(self) -> None:
+        ranked = self.bot.list_top_candidates(limit=2, allow_repeat=True)
+
+        self.assertGreaterEqual(len(ranked), 1)
+        self.assertEqual(ranked[0][0].symbol, "MSFT")
+
+    def test_send_top_tips_reports_empty_when_everything_fails_quality_screen(self) -> None:
+        sent_messages: list[str] = []
+        self.bot.approvals.http_post = lambda url, payload: sent_messages.append(payload["text"])
+        original = self.bot.market_data.get_stock_fundamentals
+
+        def weak(symbol: str) -> StockFundamentals:
+            data = original(symbol)
+            return StockFundamentals(
+                data.symbol,
+                data.current_price,
+                data.market_cap,
+                data.shares_outstanding,
+                data.sector,
+                data.trailing_pe,
+                data.forward_pe,
+                data.price_to_book,
+                data.peg_ratio,
+                -0.02,
+                -0.01,
+                0.03,
+                data.revenue_growth,
+                -0.05,
+                220.0,
+                None,
+                None,
+                -0.02,
+                5.5,
+                data.target_mean_price,
+            )
+
+        self.bot.market_data.get_stock_fundamentals = weak
+
+        generated = self.bot.send_top_tips(chat_id="chat", limit=3)
+
+        self.assertEqual(generated, 0)
+        self.assertEqual(len(sent_messages), 1)
+        self.assertIn("No stocks passed the quality-value screen", sent_messages[0])
 
     def test_add_stock_updates_runtime_universe_without_restart(self) -> None:
         added, symbol, total = self.bot.add_stock("NVDA")

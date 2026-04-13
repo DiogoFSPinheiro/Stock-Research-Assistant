@@ -228,6 +228,46 @@ class MarketDataProviderTests(unittest.TestCase):
         self.assertEqual(factory_calls, ["AAPL"])
         self.assertEqual(ticker.history_calls, 1)
 
+    def test_yfinance_maps_extended_fundamentals_for_fair_value(self) -> None:
+        class FundamentalsTicker:
+            info = {
+                "currentPrice": 100.0,
+                "marketCap": 1_000_000_000.0,
+                "sharesOutstanding": 10_000_000.0,
+                "sector": "Technology",
+                "trailingPE": 20.0,
+                "forwardPE": 18.0,
+                "priceToBook": 4.0,
+                "pegRatio": 1.2,
+                "profitMargins": 0.22,
+                "operatingMargins": 0.25,
+                "returnOnEquity": 0.20,
+                "revenueGrowth": 0.10,
+                "earningsGrowth": 0.12,
+                "debtToEquity": 40.0,
+                "targetMeanPrice": 118.0,
+                "freeCashflow": 60_000_000.0,
+                "enterpriseValue": 900_000_000.0,
+                "totalRevenue": 300_000_000.0,
+                "totalDebt": 200_000_000.0,
+                "totalCash": 50_000_000.0,
+                "ebitda": 100_000_000.0,
+            }
+
+        provider = YFinanceMarketDataProvider(
+            MarketDataConfig("yfinance", "", "", 20),
+            self.universe,
+            ticker_factory=lambda symbol: FundamentalsTicker(),
+        )
+
+        data = provider.get_stock_fundamentals("AAPL")
+
+        self.assertEqual(data.sector, "Technology")
+        self.assertAlmostEqual(data.earnings_yield or 0.0, 0.05)
+        self.assertAlmostEqual(data.free_cash_flow_yield or 0.0, 60_000_000 / 900_000_000)
+        self.assertAlmostEqual(data.fcf_margin or 0.0, 60_000_000 / 300_000_000)
+        self.assertAlmostEqual(data.net_debt_to_ebit or 0.0, 1.5)
+
 
 if __name__ == "__main__":
     unittest.main()

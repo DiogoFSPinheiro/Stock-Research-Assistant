@@ -90,7 +90,7 @@ class TelegramApprovalServiceTests(unittest.TestCase):
     def test_publish_signal_sends_message(self) -> None:
         self.service.publish_signal(self.signal, self.proposal)
         self.assertEqual(len(self.calls), 1)
-        self.assertIn("Undervalued Stock Pick", self.calls[0][1]["text"])
+        self.assertIn("Quality-Value Stock Pick", self.calls[0][1]["text"])
         self.assertIn("Ticker: AAPL", self.calls[0][1]["text"])
         self.assertIn("Best Horizon:", self.calls[0][1]["text"])
         self.assertIn("Entry Price: 100.0000", self.calls[0][1]["text"])

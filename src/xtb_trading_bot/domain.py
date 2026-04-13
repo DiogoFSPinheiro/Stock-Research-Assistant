@@ -70,6 +70,11 @@ class Signal:
     uncertainty: float | None = None
     probability_positive: float | None = None
     horizon_days: int | None = None
+    fair_value: float | None = None
+    margin_of_safety: float | None = None
+    quality_score: float | None = None
+    timing_score: float | None = None
+    risk_flags: tuple[str, ...] = ()
     created_at: datetime = field(default_factory=utc_now)
 
 
@@ -126,6 +131,8 @@ class StockFundamentals:
     symbol: str
     current_price: float
     market_cap: float | None
+    shares_outstanding: float | None
+    sector: str | None
     trailing_pe: float | None
     forward_pe: float | None
     price_to_book: float | None
@@ -136,4 +143,8 @@ class StockFundamentals:
     revenue_growth: float | None
     earnings_growth: float | None
     debt_to_equity: float | None
+    earnings_yield: float | None
+    free_cash_flow_yield: float | None
+    fcf_margin: float | None
+    net_debt_to_ebit: float | None
     target_mean_price: float | None
