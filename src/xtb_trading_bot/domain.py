@@ -129,6 +129,7 @@ class PerformanceSnapshot:
 @dataclass(frozen=True)
 class StockFundamentals:
     symbol: str
+    company_name: str | None
     current_price: float
     market_cap: float | None
     shares_outstanding: float | None
@@ -148,3 +149,22 @@ class StockFundamentals:
     fcf_margin: float | None
     net_debt_to_ebit: float | None
     target_mean_price: float | None
+
+
+@dataclass(frozen=True)
+class StockAnalysisReport:
+    symbol: str
+    company_name: str | None
+    current_price: float
+    fcf_value: float | None
+    dcf_value: float | None
+    intrinsic_value: float | None
+    analyst_target: float | None
+    margin_of_safety: float | None
+    quality_score: float
+    options_sentiment: str
+    options_put_call_ratio: float | None
+    benchmark_summary: str
+    benchmark_score: float
+    recommendation: str
+    key_risk: str

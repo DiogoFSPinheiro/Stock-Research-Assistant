@@ -8,8 +8,9 @@ import time
 from typing import Any, Callable
 from urllib import parse, request
 
+from .analysis import build_stock_analysis_report
 from .config import MarketDataConfig, UniverseConfig
-from .domain import AssetClass, Candle, ContextSnapshot, Instrument, PositionSnapshot, StockFundamentals
+from .domain import AssetClass, Candle, ContextSnapshot, Instrument, PositionSnapshot, StockAnalysisReport, StockFundamentals
 
 
 class MarketDataError(RuntimeError):
@@ -199,6 +200,7 @@ class SyntheticMarketDataProvider:
         current_price = self.get_quote(symbol)
         return StockFundamentals(
             symbol=symbol,
+            company_name=f"{symbol} Holdings",
             current_price=current_price,
             market_cap=200_000_000_000,
             shares_outstanding=5_000_000_000,
@@ -220,6 +222,11 @@ class SyntheticMarketDataProvider:
             target_mean_price=current_price * 1.18,
         )
 
+    def get_stock_analysis(self, symbol: str, peer_symbols: list[str]) -> StockAnalysisReport:
+        fundamentals = self.get_stock_fundamentals(symbol)
+        peers = [self.get_stock_fundamentals(peer) for peer in peer_symbols if peer != symbol]
+        return build_stock_analysis_report(symbol, fundamentals, peers, put_call_ratio=0.95)
+
 
 @dataclass
 class AlphaVantageMarketDataProvider:
@@ -236,6 +243,9 @@ class AlphaVantageMarketDataProvider:
 
     def get_stock_fundamentals(self, symbol: str) -> StockFundamentals:
         raise MarketDataError("Stock fundamentals are not supported for alpha_vantage in this runtime.")
+
+    def get_stock_analysis(self, symbol: str, peer_symbols: list[str]) -> StockAnalysisReport:
+        raise MarketDataError("Detailed stock analysis is not supported for alpha_vantage in this runtime.")
 
     def get_quote(self, symbol: str) -> float:
         candles = self.get_candles(symbol, "D1", 1)
@@ -418,6 +428,7 @@ class YFinanceMarketDataProvider:
         )
         fundamentals = StockFundamentals(
             symbol=symbol,
+            company_name=_optional_str(info.get("longName")) or _optional_str(info.get("shortName")) or symbol,
             current_price=current_price,
             market_cap=_optional_float(info.get("marketCap")),
             shares_outstanding=_optional_float(info.get("sharesOutstanding")),
@@ -440,6 +451,22 @@ class YFinanceMarketDataProvider:
         )
         self.fundamentals_cache[symbol] = (time.monotonic(), fundamentals)
         return fundamentals
+
+    def get_stock_analysis(self, symbol: str, peer_symbols: list[str]) -> StockAnalysisReport:
+        fundamentals = self.get_stock_fundamentals(symbol)
+        peer_fundamentals: list[StockFundamentals] = []
+        for peer_symbol in peer_symbols:
+            if peer_symbol == symbol:
+                continue
+            try:
+                peer_data = self.get_stock_fundamentals(peer_symbol)
+            except MarketDataError:
+                continue
+            if fundamentals.sector and peer_data.sector and peer_data.sector != fundamentals.sector:
+                continue
+            peer_fundamentals.append(peer_data)
+        put_call_ratio = self._get_put_call_ratio(symbol)
+        return build_stock_analysis_report(symbol, fundamentals, peer_fundamentals[:6], put_call_ratio=put_call_ratio)
 
     def get_quote(self, symbol: str) -> float:
         candles = self.get_candles(symbol, "D1", 1)
@@ -535,6 +562,26 @@ class YFinanceMarketDataProvider:
         self.ticker_cache[provider_symbol] = ticker
         return ticker
 
+    def _get_put_call_ratio(self, symbol: str) -> float | None:
+        provider_symbol = self._provider_symbol(symbol)
+        ticker = self._build_ticker(provider_symbol, symbol)
+        expiries = getattr(ticker, "options", ()) or ()
+        if not expiries:
+            return None
+        try:
+            chain = ticker.option_chain(expiries[0])
+        except Exception as exc:
+            if _is_retryable_market_data_exception(exc):
+                return None
+            raise MarketDataError(f"Unable to load options chain for {symbol}: {exc}") from exc
+        calls = getattr(chain, "calls", None)
+        puts = getattr(chain, "puts", None)
+        call_open_interest = _sum_open_interest(calls)
+        put_open_interest = _sum_open_interest(puts)
+        if call_open_interest <= 0:
+            return None
+        return put_open_interest / call_open_interest
+
     def _compute_earnings_yield(self, info: dict[str, Any]) -> float | None:
         trailing_pe = _optional_float(info.get("trailingPE"))
         if trailing_pe is not None and trailing_pe > 0:
@@ -584,6 +631,24 @@ def _optional_str(value: Any) -> str | None:
         return None
     result = str(value).strip()
     return result or None
+
+
+def _sum_open_interest(option_rows: Any) -> float:
+    if option_rows is None:
+        return 0.0
+    try:
+        if hasattr(option_rows, "empty") and option_rows.empty:
+            return 0.0
+        series = option_rows["openInterest"] if "openInterest" in option_rows else None
+        if series is None:
+            return 0.0
+        if hasattr(series, "fillna"):
+            series = series.fillna(0.0)
+        if hasattr(series, "sum"):
+            return float(series.sum())
+    except Exception:
+        return 0.0
+    return 0.0
 
 
 def build_market_data_provider(

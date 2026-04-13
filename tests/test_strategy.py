@@ -30,6 +30,7 @@ def build_candles(start: float, step: float, count: int) -> list[Candle]:
 def fundamentals(price: float, target_multiple: float = 1.2) -> StockFundamentals:
     return StockFundamentals(
         symbol="MSFT",
+        company_name="Microsoft Corporation",
         current_price=price,
         market_cap=2.0e12,
         shares_outstanding=7.4e9,
@@ -83,6 +84,7 @@ class UndervaluedStockEngineTests(unittest.TestCase):
     def test_returns_no_trade_when_quality_is_weak_even_if_cheap(self) -> None:
         weak = StockFundamentals(
             symbol="MSFT",
+            company_name="Microsoft Corporation",
             current_price=164.0,
             market_cap=2.0e12,
             shares_outstanding=7.4e9,
@@ -126,6 +128,7 @@ class UndervaluedStockEngineTests(unittest.TestCase):
     def test_returns_no_trade_when_core_valuation_inputs_are_missing(self) -> None:
         missing = StockFundamentals(
             symbol="MSFT",
+            company_name="Microsoft Corporation",
             current_price=164.0,
             market_cap=2.0e12,
             shares_outstanding=7.4e9,

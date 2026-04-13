@@ -192,7 +192,7 @@ class TelegramApprovalServiceTests(unittest.TestCase):
 
         self.assertEqual(
             results,
-            [TelegramCommand(kind="add_stock", chat_id=999, actor="alice", text='add "NVDA"', symbol="NVDA")],
+            [TelegramCommand(update_id=56, kind="add_stock", chat_id=999, actor="alice", text='add "NVDA"', symbol="NVDA")],
         )
         self.assertEqual(self.service.last_update_id, 56)
 
@@ -217,7 +217,7 @@ class TelegramApprovalServiceTests(unittest.TestCase):
 
         self.assertEqual(
             results,
-            [TelegramCommand(kind="top_tips", chat_id=999, actor="alice", text="/top 3", symbol=None, limit=3)],
+            [TelegramCommand(update_id=57, kind="top_tips", chat_id=999, actor="alice", text="/top 3", symbol=None, limit=3)],
         )
 
     def test_poll_commands_parses_specific_ticker_tip(self) -> None:
@@ -241,8 +241,70 @@ class TelegramApprovalServiceTests(unittest.TestCase):
 
         self.assertEqual(
             results,
-            [TelegramCommand(kind="tip_for_symbol", chat_id=999, actor="alice", text="/tip aapl", symbol="AAPL", limit=None)],
+            [TelegramCommand(update_id=58, kind="tip_for_symbol", chat_id=999, actor="alice", text="/tip aapl", symbol="AAPL", limit=None)],
         )
+
+    def test_poll_commands_parses_stock_analysis(self) -> None:
+        self.responses.append(
+            {
+                "ok": True,
+                "result": [
+                    {
+                        "update_id": 59,
+                        "message": {
+                            "chat": {"id": 999},
+                            "from": {"username": "alice"},
+                            "text": 'Analise "msft"',
+                        },
+                    }
+                ],
+            }
+        )
+
+        results = self.service.poll_commands()
+
+        self.assertEqual(
+            results,
+            [TelegramCommand(update_id=59, kind="stock_analysis", chat_id=999, actor="alice", text='Analise "msft"', symbol="MSFT", limit=None)],
+        )
+
+    def test_poll_commands_dedupes_identical_repeated_command(self) -> None:
+        self.responses.extend(
+            [
+                {
+                    "ok": True,
+                    "result": [
+                        {
+                            "update_id": 60,
+                            "message": {
+                                "chat": {"id": 999},
+                                "from": {"username": "alice"},
+                                "text": "Analise MT",
+                            },
+                        }
+                    ],
+                },
+                {
+                    "ok": True,
+                    "result": [
+                        {
+                            "update_id": 61,
+                            "message": {
+                                "chat": {"id": 999},
+                                "from": {"username": "alice"},
+                                "text": "Analise MT",
+                            },
+                        }
+                    ],
+                },
+            ]
+        )
+
+        first = self.service.poll_commands()
+        second = self.service.poll_commands()
+
+        self.assertEqual(len(first), 1)
+        self.assertEqual(second, [])
 
     def test_poll_commands_swallows_get_updates_errors(self) -> None:
         self.service.http_get = lambda url: (_ for _ in ()).throw(TelegramApiError("Telegram getUpdates failed: timed out"))

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import json
+import time
 from typing import Callable
 from urllib import error, parse, request
 
@@ -35,6 +36,7 @@ class TipRequest:
 
 @dataclass(frozen=True)
 class TelegramCommand:
+    update_id: int
     kind: str
     chat_id: str | int | None
     actor: str
@@ -74,6 +76,8 @@ class TelegramApprovalService:
     decisions: list[ApprovalDecision] = field(default_factory=list)
     positions_provider: Callable[[], list[PositionSnapshot]] | None = None
     last_update_id: int | None = None
+    dedupe_window_seconds: int = 20
+    recent_command_signatures: dict[tuple[str | int | None, str], float] = field(default_factory=dict)
 
     def _bot_api_url(self, method: str) -> str:
         return f"https://api.telegram.org/bot{self.config.bot_token}/{method}"
@@ -102,7 +106,7 @@ class TelegramApprovalService:
         if first in {"/tip", "/give_a_tip", "tip"} or lowered == "give a tip":
             symbol = parts[1].upper() if len(parts) >= 2 else None
             kind = "tip_for_symbol" if symbol else "tip"
-            return TelegramCommand(kind=kind, chat_id=update.chat_id, actor=update.actor, text=update.text, symbol=symbol)
+            return TelegramCommand(update_id=update.update_id, kind=kind, chat_id=update.chat_id, actor=update.actor, text=update.text, symbol=symbol)
         if first in {"/top", "/tips"}:
             limit = None
             if len(parts) >= 2:
@@ -110,11 +114,22 @@ class TelegramApprovalService:
                     limit = max(1, min(int(parts[1]), 10))
                 except ValueError:
                     limit = None
-            return TelegramCommand(kind="top_tips", chat_id=update.chat_id, actor=update.actor, text=update.text, limit=limit)
+            return TelegramCommand(update_id=update.update_id, kind="top_tips", chat_id=update.chat_id, actor=update.actor, text=update.text, limit=limit)
         if first in {"/add", "add"}:
             if len(parts) >= 2:
                 return TelegramCommand(
+                    update_id=update.update_id,
                     kind="add_stock",
+                    chat_id=update.chat_id,
+                    actor=update.actor,
+                    text=update.text,
+                    symbol=parts[1].upper(),
+                )
+        if first in {"/analise", "analise", "/analyze", "analyze", "/analyse", "analyse"}:
+            if len(parts) >= 2:
+                return TelegramCommand(
+                    update_id=update.update_id,
+                    kind="stock_analysis",
                     chat_id=update.chat_id,
                     actor=update.actor,
                     text=update.text,
@@ -231,7 +246,7 @@ class TelegramApprovalService:
                 continue
             self.last_update_id = update.update_id if self.last_update_id is None else max(self.last_update_id, update.update_id)
             command = self._parse_command(update)
-            if command is not None:
+            if command is not None and not self._is_duplicate_command(command):
                 commands.append(command)
         return commands
 
@@ -242,6 +257,20 @@ class TelegramApprovalService:
     def get_pending_decisions(self) -> list[ApprovalDecision]:
         decisions, self.decisions = self.decisions[:], []
         return decisions
+
+    def _is_duplicate_command(self, command: TelegramCommand) -> bool:
+        now = time.monotonic()
+        signature = (command.chat_id, " ".join(command.text.strip().split()).lower())
+        expired = [
+            key
+            for key, seen_at in self.recent_command_signatures.items()
+            if (now - seen_at) > self.dedupe_window_seconds
+        ]
+        for key in expired:
+            self.recent_command_signatures.pop(key, None)
+        previous = self.recent_command_signatures.get(signature)
+        self.recent_command_signatures[signature] = now
+        return previous is not None and (now - previous) <= self.dedupe_window_seconds
 
 
 def _format_horizon(horizon_days: int) -> str:

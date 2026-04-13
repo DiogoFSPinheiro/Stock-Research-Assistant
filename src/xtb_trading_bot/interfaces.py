@@ -11,6 +11,7 @@ from .domain import (
     Signal,
     OrderProposal,
     StockFundamentals,
+    StockAnalysisReport,
 )
 
 
@@ -31,6 +32,9 @@ class MarketDataProvider(Protocol):
         ...
 
     def get_stock_fundamentals(self, symbol: str) -> StockFundamentals:
+        ...
+
+    def get_stock_analysis(self, symbol: str, peer_symbols: list[str]) -> StockAnalysisReport:
         ...
 
 

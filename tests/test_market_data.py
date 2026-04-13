@@ -268,6 +268,15 @@ class MarketDataProviderTests(unittest.TestCase):
         self.assertAlmostEqual(data.fcf_margin or 0.0, 60_000_000 / 300_000_000)
         self.assertAlmostEqual(data.net_debt_to_ebit or 0.0, 1.5)
 
+    def test_synthetic_provider_can_build_stock_analysis(self) -> None:
+        provider = SyntheticMarketDataProvider(self.universe)
+
+        report = provider.get_stock_analysis("AAPL", ["MSFT"])
+
+        self.assertEqual(report.symbol, "AAPL")
+        self.assertIsNotNone(report.intrinsic_value)
+        self.assertIn(report.recommendation, {"BUY", "HOLD", "SELL"})
+
 
 if __name__ == "__main__":
     unittest.main()

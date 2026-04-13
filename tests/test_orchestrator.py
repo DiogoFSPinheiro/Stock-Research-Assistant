@@ -21,16 +21,16 @@ class RichSyntheticMarketDataProvider(SyntheticMarketDataProvider):
         current = self.get_quote(symbol)
         if symbol == "AAPL":
             return StockFundamentals(
-                symbol, current, 2.5e12, 15.0e9, "Technology", 28, 24, 9.0, 2.4, 0.22, 0.28, 1.4, 0.03, 0.04, 110,
+                symbol, "Apple Inc.", current, 2.5e12, 15.0e9, "Technology", 28, 24, 9.0, 2.4, 0.22, 0.28, 1.4, 0.03, 0.04, 110,
                 1 / 28.0, 0.028, 0.09, 2.8, current * 1.05
             )
         if symbol == "MSFT":
             return StockFundamentals(
-                symbol, current, 1.8e12, 7.4e9, "Technology", 18, 15, 3.4, 1.1, 0.24, 0.27, 0.22, 0.12, 0.15, 40,
+                symbol, "Microsoft Corporation", current, 1.8e12, 7.4e9, "Technology", 18, 15, 3.4, 1.1, 0.24, 0.27, 0.22, 0.12, 0.15, 40,
                 1 / 18.0, 0.060, 0.20, 1.1, current * 1.25
             )
         return StockFundamentals(
-            symbol, current, 8.0e11, 6.0e9, "Technology", 20, 17, 4.5, 1.6, 0.18, 0.22, 0.16, 0.08, 0.10, 65,
+            symbol, f"{symbol} Holdings", current, 8.0e11, 6.0e9, "Technology", 20, 17, 4.5, 1.6, 0.18, 0.22, 0.16, 0.08, 0.10, 65,
             1 / 20.0, 0.045, 0.14, 1.6, current * 1.18
         )
 
@@ -153,6 +153,7 @@ class TradingBotTests(unittest.TestCase):
             data = original(symbol)
             return StockFundamentals(
                 data.symbol,
+                data.company_name,
                 data.current_price,
                 data.market_cap,
                 data.shares_outstanding,
@@ -181,6 +182,22 @@ class TradingBotTests(unittest.TestCase):
         self.assertEqual(generated, 0)
         self.assertEqual(len(sent_messages), 1)
         self.assertIn("No stocks passed the quality-value screen", sent_messages[0])
+
+    def test_analyze_stock_publishes_compact_report_and_adds_symbol(self) -> None:
+        sent_messages: list[str] = []
+        self.bot.approvals.http_post = lambda url, payload: sent_messages.append(payload["text"])
+
+        generated = self.bot.analyze_stock("NVDA", chat_id="chat")
+
+        self.assertEqual(generated, 1)
+        self.assertEqual(len(sent_messages), 1)
+        self.assertIn("ANALISE NVDA", sent_messages[0])
+        self.assertIn("NVDA Holdings (NVDA)", sent_messages[0])
+        self.assertIn("FCF model:", sent_messages[0])
+        self.assertIn("DCF model:", sent_messages[0])
+        self.assertIn("Intrinsic value:", sent_messages[0])
+        self.assertIn("Decision:", sent_messages[0])
+        self.assertIn("NVDA", self.bot.config.universe.allowed_stocks)
 
     def test_add_stock_updates_runtime_universe_without_restart(self) -> None:
         added, symbol, total = self.bot.add_stock("NVDA")

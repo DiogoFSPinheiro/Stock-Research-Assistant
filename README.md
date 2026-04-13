@@ -10,6 +10,7 @@ Local Python bot that scans a stock universe from a file, estimates fair value u
 - Technical overlay used for timing and entry confirmation instead of defining undervaluation
 - Telegram delivery with fair value, margin of safety, quality score, timing score, and risk flags
 - On-demand Telegram tip requests with `/tip`, `/tip MSFT`, `/top 3`, or `give a tip`
+- On-demand deep stock analysis with `Analise MSFT` or `/analise MSFT`
 - Runtime stock universe updates without restarting the bot
 - JSON persistence for picks and analysis history
 - Unit test suite covering valuation math, filters, ranking logic, Telegram flow, and orchestration
@@ -22,6 +23,7 @@ Local Python bot that scans a stock universe from a file, estimates fair value u
 - Send `/tip` in Telegram whenever you want an immediate fresh single-stock idea without waiting for the next scheduled cycle.
 - Send `/tip MSFT` to force a fresh analysis for one ticker.
 - Send `/top 3` to request a ranked shortlist on demand.
+- Send `Analise MSFT` to run a compact multi-model stock analysis and add the ticker to your watch universe.
 - Send `add NVDA` or `/add NVDA` in Telegram to append a stock to the universe file and use it on the next scan.
 - Market data is required for stocks; the project does not execute trades.
 - The code is designed to use `yfinance` by default for market data, so you can run it without a paid API key.
@@ -80,12 +82,14 @@ Once the bot is running, open Telegram and use:
 - `/top 3` for the ranked shortlist
 - `/tip` for one best current idea
 - `/tip MSFT` for a single-ticker check
+- `Analise MSFT` for FCF, DCF, intrinsic value, options, peer benchmark, and buy/hold/sell
 - `/add NVDA` to add a stock to the universe
 
 ## Configuration
 
 - `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are required for delivery.
 - Use `/tip`, `/tip SYMBOL`, or `/top N` in Telegram to trigger immediate scans.
+- Use `Analise SYMBOL` or `/analise SYMBOL` to run a compact stock analysis and auto-add valid tickers to the watch universe.
 - You can edit the stock universe file while the bot is running; it reloads the file automatically before scans.
 - `MARKET_DATA_PROVIDER=yfinance` is the default live-data path; `synthetic` is still available for local dry runs.
 - `BOT_ALLOWED_STOCKS` defines the stock universe the picker will rank.
@@ -105,3 +109,14 @@ Each shortlisted stock now includes:
 - timing score
 - expected return and probability up
 - risk flags and a short rationale
+
+The `Analise SYMBOL` command includes:
+
+- current price
+- `FCF model`
+- `DCF model`
+- `Intrinsic value`
+- analyst target
+- options trader sentiment
+- peer benchmark summary
+- final `BUY`, `HOLD`, or `SELL`

@@ -9,6 +9,7 @@ from xtb_trading_bot.valuation import compute_fair_value
 def fundamentals(**overrides: object) -> StockFundamentals:
     payload = {
         "symbol": "MSFT",
+        "company_name": "Microsoft Corporation",
         "current_price": 100.0,
         "market_cap": 2.0e12,
         "shares_outstanding": 7.4e9,

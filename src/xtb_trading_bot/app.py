@@ -110,11 +110,6 @@ def main() -> int:
                     return 0
                 generated = 0
                 ran_scheduled_scan = False
-                if time.monotonic() >= next_scan_at:
-                    generated += bot.scan()
-                    next_scan_at = time.monotonic() + bot.config.poll_seconds
-                    ran_scheduled_scan = True
-
                 if hasattr(bot.approvals, "poll_commands"):
                     commands = bot.approvals.poll_commands()
                 elif hasattr(bot.approvals, "poll_tip_requests"):
@@ -122,6 +117,10 @@ def main() -> int:
                 else:
                     commands = []
                 polled = len(commands)
+                if not commands and time.monotonic() >= next_scan_at:
+                    generated += bot.scan()
+                    next_scan_at = time.monotonic() + bot.config.poll_seconds
+                    ran_scheduled_scan = True
                 for command in commands:
                     kind = getattr(command, "kind", "tip")
                     if kind == "tip":
@@ -159,6 +158,19 @@ def main() -> int:
                             if hasattr(bot.approvals, "publish_text"):
                                 bot.approvals.publish_text(
                                     f"Unable to add stock: {exc}",
+                                    chat_id=getattr(command, "chat_id", None),
+                                )
+                        continue
+                    if kind == "stock_analysis":
+                        try:
+                            generated += bot.analyze_stock(
+                                getattr(command, "symbol", "") or "",
+                                chat_id=getattr(command, "chat_id", None),
+                            )
+                        except ConfigError as exc:
+                            if hasattr(bot.approvals, "publish_text"):
+                                bot.approvals.publish_text(
+                                    f"Unable to analyze stock: {exc}",
                                     chat_id=getattr(command, "chat_id", None),
                                 )
                         continue

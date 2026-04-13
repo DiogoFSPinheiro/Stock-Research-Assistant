@@ -5,7 +5,7 @@ import logging
 from typing import Callable
 
 from .config import AppConfig, ConfigError, append_stock_to_universe, refresh_stock_universe
-from .domain import ApprovalStatus, AssetClass, SignalSide
+from .domain import ApprovalStatus, AssetClass, SignalSide, StockAnalysisReport
 from .instruments import InstrumentFilter
 from .interfaces import ApprovalService, MarketDataProvider, StateStore
 from .market_data import MarketDataError
@@ -198,6 +198,28 @@ class TradingBot:
             return 0
         return len(candidates)
 
+    def analyze_stock(self, symbol: str, chat_id: str | int | None = None) -> int:
+        normalized_symbol = symbol.strip().strip('"').strip("'").upper()
+        if not normalized_symbol:
+            raise ConfigError("Stock symbol cannot be empty.")
+        self.refresh_universe()
+        try:
+            report = self.market_data.get_stock_analysis(normalized_symbol, list(self.config.universe.allowed_stocks))
+            added, normalized_symbol, total = self.add_stock(normalized_symbol)
+        except MarketDataError as exc:
+            raise ConfigError(f"{normalized_symbol} could not be analyzed with the current market data provider.") from exc
+
+        if hasattr(self.approvals, "publish_text"):
+            try:
+                self.approvals.publish_text(
+                    self._format_stock_analysis(report, added=added, total=total),
+                    chat_id=chat_id,
+                )
+            except TelegramApiError as exc:
+                self.logger.warning("Telegram publish failed for stock analysis %s: %s", normalized_symbol, exc)
+                return 0
+        return 1
+
     def scan(self) -> int:
         if hasattr(self.approvals, "publish_text"):
             return self.send_top_tips(limit=3)
@@ -235,3 +257,33 @@ class TradingBot:
 
     def _format_risks(self, flags: tuple[str, ...] | list[str]) -> str:
         return "none flagged" if not flags else ", ".join(str(flag) for flag in flags)
+
+    def _format_stock_analysis(self, report: StockAnalysisReport, added: bool, total: int) -> str:
+        universe_line = (
+            f"Universe: added to watchlist ({total} stocks)"
+            if added
+            else f"Universe: already watching ({total} stocks)"
+        )
+        options_line = (
+            f"{report.options_sentiment} ({report.options_put_call_ratio:.2f} put/call)"
+            if report.options_put_call_ratio is not None
+            else report.options_sentiment
+        )
+        margin_line = self._format_pct(report.margin_of_safety)
+        return "\n".join(
+            [
+                f"ANALISE {report.symbol}: {(report.company_name or report.symbol)} ({report.symbol})",
+                f"Price: {report.current_price:.2f}",
+                f"FCF model: {self._format_price(report.fcf_value)}",
+                f"DCF model: {self._format_price(report.dcf_value)}",
+                f"Intrinsic value: {self._format_price(report.intrinsic_value)}",
+                f"Analyst target: {self._format_price(report.analyst_target)}",
+                f"Margin of safety: {margin_line}",
+                f"Quality model: {self._format_score(report.quality_score)}",
+                f"Options traders: {options_line}",
+                f"Benchmark: {report.benchmark_summary}",
+                f"Risk: {report.key_risk}",
+                f"Decision: {report.recommendation}",
+                universe_line,
+            ]
+        )
