@@ -140,6 +140,8 @@ class AppConfig:
     universe: UniverseConfig
     telegram: TelegramConfig
     poll_seconds: int
+    auto_scan_hour: int
+    auto_scan_minute: int
     log_level: str
     storage_path: Path
 
@@ -179,6 +181,8 @@ class AppConfig:
                 drop_pending_updates_on_start=_get_bool("TELEGRAM_DROP_PENDING_UPDATES_ON_START", False),
             ),
             poll_seconds=int(os.getenv("BOT_POLL_SECONDS", "300")),
+            auto_scan_hour=int(os.getenv("BOT_AUTO_SCAN_HOUR", "9")),
+            auto_scan_minute=int(os.getenv("BOT_AUTO_SCAN_MINUTE", "0")),
             log_level=os.getenv("BOT_LOG_LEVEL", "INFO"),
             storage_path=Path(os.getenv("BOT_STORAGE_PATH", "data/state.json")),
         )
@@ -201,3 +205,7 @@ class AppConfig:
             raise ConfigError(f"Unsupported BOT_ALLOWED_TIMEFRAMES values: {', '.join(invalid_timeframes)}")
         if self.poll_seconds <= 0:
             raise ConfigError("BOT_POLL_SECONDS must be greater than 0.")
+        if not 0 <= self.auto_scan_hour <= 23:
+            raise ConfigError("BOT_AUTO_SCAN_HOUR must be between 0 and 23.")
+        if not 0 <= self.auto_scan_minute <= 59:
+            raise ConfigError("BOT_AUTO_SCAN_MINUTE must be between 0 and 59.")

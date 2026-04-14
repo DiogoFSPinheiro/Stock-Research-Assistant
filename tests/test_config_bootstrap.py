@@ -65,6 +65,8 @@ class ConfigBootstrapTests(unittest.TestCase):
         self.assertEqual(config.telegram.chat_id, "")
         self.assertTrue(config.telegram.drop_pending_updates_on_start)
         self.assertEqual(config.poll_seconds, 1800)
+        self.assertEqual(config.auto_scan_hour, 9)
+        self.assertEqual(config.auto_scan_minute, 0)
         self.assertEqual(config.storage_path, Path("data/state.json"))
 
     def test_build_application_bootstraps_synthetic_mode_without_network(self) -> None:

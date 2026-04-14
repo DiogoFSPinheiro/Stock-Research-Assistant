@@ -24,6 +24,10 @@ class TradingBot:
     risk: RiskEngine
     state_store: StateStore
     logger: logging.Logger
+    should_stop: Callable[[], bool] | None = None
+
+    def _stop_requested(self) -> bool:
+        return bool(self.should_stop and self.should_stop())
 
     def refresh_universe(self) -> int:
         refreshed = refresh_stock_universe(self.config.universe)
@@ -54,6 +58,9 @@ class TradingBot:
         allow_repeat: bool = False,
         symbol_filter: Callable[[str], bool] | None = None,
     ) -> list[tuple[object, object]]:
+        if self._stop_requested():
+            self.logger.info("Stop requested. Aborting candidate collection before start.")
+            return []
         self.refresh_universe()
         instruments = self.market_data.list_instruments()
         tradable = [
@@ -66,10 +73,15 @@ class TradingBot:
         context = self.market_data.get_context([item.symbol for item in context_instruments])
         positions = self.market_data.list_positions()
         performance = self.state_store.get_performance()
-
         candidates: list[tuple[object, object]] = []
         for instrument in tradable:
+            if self._stop_requested():
+                self.logger.info("Stop requested. Aborting candidate collection.")
+                return []
             for timeframe in self.config.universe.allowed_timeframes:
+                if self._stop_requested():
+                    self.logger.info("Stop requested. Aborting candidate collection.")
+                    return []
                 try:
                     candles = self.market_data.get_candles(instrument.symbol, timeframe, 60)
                     fundamentals = self.market_data.get_stock_fundamentals(instrument.symbol)
@@ -130,8 +142,12 @@ class TradingBot:
         notify_when_empty: bool = False,
         symbol: str | None = None,
     ) -> int:
+        self.logger.info("Starting tip request for %s", symbol.upper() if symbol else "best candidate")
         candidate = self._select_best_candidate(allow_repeat=allow_repeat, symbol=symbol)
         if candidate is None:
+            if self._stop_requested():
+                self.logger.info("Stop requested. Tip request aborted.")
+                return 0
             if notify_when_empty and hasattr(self.approvals, "publish_text"):
                 try:
                     message = (
@@ -162,8 +178,12 @@ class TradingBot:
     def send_top_tips(self, chat_id: str | int | None = None, limit: int = 5) -> int:
         if not hasattr(self.approvals, "publish_text"):
             return 0
+        self.logger.info("Building TOP QUALITY-VALUE IDEAS shortlist with limit=%s", limit)
         candidates = self.list_top_candidates(limit=limit, allow_repeat=True)
         if not candidates:
+            if self._stop_requested():
+                self.logger.info("Stop requested. Shortlist generation aborted.")
+                return 0
             try:
                 self.approvals.publish_text("TOP QUALITY-VALUE IDEAS\nNo stocks passed the quality-value screen right now.", chat_id=chat_id)
             except TelegramApiError as exc:
@@ -171,7 +191,10 @@ class TradingBot:
                 return 0
             return 0
 
-        lines = ["TOP QUALITY-VALUE IDEAS", ""]
+        header = "TOP QUALITY-VALUE IDEAS"
+        if len(candidates) < limit:
+            header = f"{header} ({len(candidates)} of {limit} passed the screen)"
+        lines = [header, ""]
         for index, (signal, _proposal) in enumerate(candidates, start=1):
             lines.extend(
                 [
@@ -202,17 +225,23 @@ class TradingBot:
         normalized_symbol = symbol.strip().strip('"').strip("'").upper()
         if not normalized_symbol:
             raise ConfigError("Stock symbol cannot be empty.")
+        self.logger.info("Starting detailed analysis for %s", normalized_symbol)
         self.refresh_universe()
         try:
             report = self.market_data.get_stock_analysis(normalized_symbol, list(self.config.universe.allowed_stocks))
-            added, normalized_symbol, total = self.add_stock(normalized_symbol)
         except MarketDataError as exc:
             raise ConfigError(f"{normalized_symbol} could not be analyzed with the current market data provider.") from exc
+        added = False
+        auto_add_applied = report.recommendation == "BUY"
+        if auto_add_applied:
+            added, normalized_symbol, total = self.add_stock(normalized_symbol)
+        else:
+            total = self.refresh_universe()
 
         if hasattr(self.approvals, "publish_text"):
             try:
                 self.approvals.publish_text(
-                    self._format_stock_analysis(report, added=added, total=total),
+                    self._format_stock_analysis(report, added=added, total=total, auto_add_applied=auto_add_applied),
                     chat_id=chat_id,
                 )
             except TelegramApiError as exc:
@@ -258,12 +287,13 @@ class TradingBot:
     def _format_risks(self, flags: tuple[str, ...] | list[str]) -> str:
         return "none flagged" if not flags else ", ".join(str(flag) for flag in flags)
 
-    def _format_stock_analysis(self, report: StockAnalysisReport, added: bool, total: int) -> str:
-        universe_line = (
-            f"Universe: added to watchlist ({total} stocks)"
-            if added
-            else f"Universe: already watching ({total} stocks)"
-        )
+    def _format_stock_analysis(self, report: StockAnalysisReport, added: bool, total: int, auto_add_applied: bool) -> str:
+        if auto_add_applied and added:
+            universe_line = f"Universe: added to watchlist ({total} stocks)"
+        elif auto_add_applied:
+            universe_line = f"Universe: already watching ({total} stocks)"
+        else:
+            universe_line = f"Universe: unchanged (auto-add only on BUY, {total} stocks)"
         options_line = (
             f"{report.options_sentiment} ({report.options_put_call_ratio:.2f} put/call)"
             if report.options_put_call_ratio is not None

@@ -27,6 +27,7 @@ class JsonStateStore:
                     "decisions": [],
                     "executions": [],
                     "performance": {"daily_pnl": 0.0, "weekly_pnl": 0.0},
+                    "scheduled_scan": {"last_run_on": None},
                 }
             )
 
@@ -105,6 +106,23 @@ class JsonStateStore:
             daily_pnl=performance["daily_pnl"],
             weekly_pnl=performance["weekly_pnl"],
         )
+
+    def get_last_scheduled_scan_on(self) -> str | None:
+        state = self._load()
+        scheduled_scan = state.get("scheduled_scan", {})
+        if not isinstance(scheduled_scan, dict):
+            return None
+        value = scheduled_scan.get("last_run_on")
+        return value if isinstance(value, str) and value else None
+
+    def mark_scheduled_scan_on(self, day: str) -> None:
+        state = self._load()
+        scheduled_scan = state.get("scheduled_scan")
+        if not isinstance(scheduled_scan, dict):
+            scheduled_scan = {}
+        scheduled_scan["last_run_on"] = day
+        state["scheduled_scan"] = scheduled_scan
+        self._save(state)
 
     def _load(self) -> dict[str, Any]:
         return json.loads(self.path.read_text(encoding="utf-8"))

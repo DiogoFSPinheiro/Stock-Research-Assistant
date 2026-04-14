@@ -4,9 +4,10 @@ from pathlib import Path
 import logging
 import unittest
 import uuid
+from dataclasses import replace
 
 from xtb_trading_bot.config import AppConfig, ConfigError, MarketDataConfig, RiskConfig, TelegramConfig, UniverseConfig
-from xtb_trading_bot.domain import StockFundamentals
+from xtb_trading_bot.domain import StockAnalysisReport, StockFundamentals
 from xtb_trading_bot.instruments import InstrumentFilter
 from xtb_trading_bot.market_data import MarketDataError, SyntheticMarketDataProvider
 from xtb_trading_bot.orchestrator import TradingBot
@@ -53,6 +54,8 @@ class TradingBotTests(unittest.TestCase):
             ),
             telegram=TelegramConfig("token", "chat", 30, 25, False),
             poll_seconds=1800,
+            auto_scan_hour=9,
+            auto_scan_minute=0,
             log_level="INFO",
             storage_path=self.state_path,
         )
@@ -138,6 +141,16 @@ class TradingBotTests(unittest.TestCase):
         self.assertIn("Margin of safety:", sent_messages[0])
         self.assertIn("Quality score:", sent_messages[0])
 
+    def test_send_top_tips_explains_when_fewer_candidates_pass_than_requested(self) -> None:
+        sent_messages: list[str] = []
+        self.bot.approvals.http_post = lambda url, payload: sent_messages.append(payload["text"])
+
+        generated = self.bot.send_top_tips(chat_id="chat", limit=5)
+
+        self.assertGreaterEqual(generated, 1)
+        self.assertEqual(len(sent_messages), 1)
+        self.assertIn("TOP QUALITY-VALUE IDEAS (", sent_messages[0])
+
     def test_list_top_candidates_ranks_by_margin_of_safety_first(self) -> None:
         ranked = self.bot.list_top_candidates(limit=2, allow_repeat=True)
 
@@ -186,6 +199,12 @@ class TradingBotTests(unittest.TestCase):
     def test_analyze_stock_publishes_compact_report_and_adds_symbol(self) -> None:
         sent_messages: list[str] = []
         self.bot.approvals.http_post = lambda url, payload: sent_messages.append(payload["text"])
+        original = self.bot.market_data.get_stock_analysis
+
+        def buy_report(symbol: str, peer_symbols: list[str]) -> StockAnalysisReport:
+            return replace(original(symbol, peer_symbols), recommendation="BUY")
+
+        self.bot.market_data.get_stock_analysis = buy_report
 
         generated = self.bot.analyze_stock("NVDA", chat_id="chat")
 
@@ -198,6 +217,22 @@ class TradingBotTests(unittest.TestCase):
         self.assertIn("Intrinsic value:", sent_messages[0])
         self.assertIn("Decision:", sent_messages[0])
         self.assertIn("NVDA", self.bot.config.universe.allowed_stocks)
+
+    def test_analyze_stock_keeps_universe_unchanged_when_not_buy(self) -> None:
+        sent_messages: list[str] = []
+        self.bot.approvals.http_post = lambda url, payload: sent_messages.append(payload["text"])
+        original = self.bot.market_data.get_stock_analysis
+
+        def hold_report(symbol: str, peer_symbols: list[str]) -> StockAnalysisReport:
+            return replace(original(symbol, peer_symbols), recommendation="HOLD")
+
+        self.bot.market_data.get_stock_analysis = hold_report
+
+        generated = self.bot.analyze_stock("NVDA", chat_id="chat")
+
+        self.assertEqual(generated, 1)
+        self.assertNotIn("NVDA", self.bot.config.universe.allowed_stocks)
+        self.assertIn("Universe: unchanged", sent_messages[0])
 
     def test_add_stock_updates_runtime_universe_without_restart(self) -> None:
         added, symbol, total = self.bot.add_stock("NVDA")

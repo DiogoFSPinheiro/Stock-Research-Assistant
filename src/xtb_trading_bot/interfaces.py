@@ -67,3 +67,9 @@ class StateStore(Protocol):
 
     def get_performance(self) -> PerformanceSnapshot:
         ...
+
+    def get_last_scheduled_scan_on(self) -> str | None:
+        ...
+
+    def mark_scheduled_scan_on(self, day: str) -> None:
+        ...

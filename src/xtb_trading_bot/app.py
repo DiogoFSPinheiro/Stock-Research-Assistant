@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from logging import Logger
+from datetime import datetime
 import threading
 import time
 
@@ -31,6 +32,9 @@ class TerminalStopController:
 
     def stop(self) -> None:
         self._stop_event.set()
+
+    def wait(self, timeout: float) -> bool:
+        return self._stop_event.wait(timeout)
 
     def _read_commands(self) -> None:
         while not self._stop_event.is_set():
@@ -76,6 +80,58 @@ def build_application(config: AppConfig | None = None) -> TradingBot:
     )
 
 
+def notify_scheduled_scan_start(bot: TradingBot) -> None:
+    message = "TOP QUALITY-VALUE IDEAS cycle started. Please wait before sending more requests."
+    bot.logger.info(message)
+    if hasattr(bot.approvals, "publish_text"):
+        try:
+            bot.approvals.publish_text(message)
+        except TelegramApiError as exc:
+            bot.logger.warning("Telegram publish failed for cycle start notice: %s", exc)
+
+
+def notify_bot_stopping(logger: Logger) -> None:
+    logger.info("Stopping bot...")
+
+
+def log_received_command(logger: Logger, command: object) -> None:
+    kind = getattr(command, "kind", "tip")
+    text = " ".join(str(getattr(command, "text", "")).split()) or kind
+    if kind == "top_tips":
+        limit = getattr(command, "limit", None) or 5
+        logger.info("Received Telegram command: %s. Building shortlist with limit=%s.", text, limit)
+        return
+    if kind == "stock_analysis":
+        symbol = getattr(command, "symbol", None) or "unknown"
+        logger.info("Received Telegram command: %s. Starting detailed analysis for %s.", text, symbol)
+        return
+    if kind == "tip_for_symbol":
+        symbol = getattr(command, "symbol", None) or "unknown"
+        logger.info("Received Telegram command: %s. Starting tip request for %s.", text, symbol)
+        return
+    if kind == "add_stock":
+        symbol = getattr(command, "symbol", None) or "unknown"
+        logger.info("Received Telegram command: %s. Adding %s to the universe.", text, symbol)
+        return
+    logger.info("Received Telegram command: %s.", text)
+
+
+def should_run_scheduled_scan(bot: TradingBot, now: datetime | None = None) -> bool:
+    now = now or datetime.now().astimezone()
+    if now.weekday() >= 5:
+        return False
+    scheduled_today = now.replace(
+        hour=bot.config.auto_scan_hour,
+        minute=bot.config.auto_scan_minute,
+        second=0,
+        microsecond=0,
+    )
+    if now < scheduled_today:
+        return False
+    today_key = now.date().isoformat()
+    return bot.state_store.get_last_scheduled_scan_on() != today_key
+
+
 def main() -> int:
     try:
         bot = build_application()
@@ -92,20 +148,22 @@ def main() -> int:
             return 3
 
     bot.logger.info(
-        "Starting undervalued stock picker with provider=%s, symbols=%s stocks, poll=%ss",
+        "Starting undervalued stock picker with provider=%s, symbols=%s stocks, auto_scan=%02d:%02d Mon-Fri",
         bot.config.market_data.provider,
         len(bot.config.universe.allowed_stocks),
-        bot.config.poll_seconds,
+        bot.config.auto_scan_hour,
+        bot.config.auto_scan_minute,
     )
     bot.logger.info("Type `stop`, `quit`, or `exit` then press Enter to stop the bot cleanly.")
-    next_scan_at = time.monotonic()
     tip_poll_interval = min(5, max(bot.config.telegram.polling_timeout_seconds, 1))
     stop_controller = TerminalStopController()
     stop_controller.start()
+    bot.should_stop = stop_controller.should_stop
     try:
         while True:
             try:
                 if stop_controller.should_stop():
+                    notify_bot_stopping(bot.logger)
                     bot.logger.info("Signal bot stopped by user.")
                     return 0
                 generated = 0
@@ -116,12 +174,22 @@ def main() -> int:
                     commands = bot.approvals.poll_tip_requests()
                 else:
                     commands = []
+                if stop_controller.should_stop():
+                    notify_bot_stopping(bot.logger)
+                    bot.logger.info("Signal bot stopped by user.")
+                    return 0
                 polled = len(commands)
-                if not commands and time.monotonic() >= next_scan_at:
+                if not commands and should_run_scheduled_scan(bot):
+                    notify_scheduled_scan_start(bot)
                     generated += bot.scan()
-                    next_scan_at = time.monotonic() + bot.config.poll_seconds
+                    if stop_controller.should_stop():
+                        notify_bot_stopping(bot.logger)
+                        bot.logger.info("Signal bot stopped by user.")
+                        return 0
+                    bot.state_store.mark_scheduled_scan_on(datetime.now().astimezone().date().isoformat())
                     ran_scheduled_scan = True
                 for command in commands:
+                    log_received_command(bot.logger, command)
                     kind = getattr(command, "kind", "tip")
                     if kind == "tip":
                         generated += bot.send_tip(
@@ -184,13 +252,18 @@ def main() -> int:
                     bot.logger.info("Cycle finished. Generated=%s polled=%s processed=%s", generated, polled, processed)
             except KeyboardInterrupt:
                 stop_controller.stop()
+                notify_bot_stopping(bot.logger)
                 bot.logger.info("Signal bot stopped by user.")
                 return 0
             except (MarketDataError, TelegramApiError, TimeoutError, OSError) as exc:
                 bot.logger.warning("Cycle failed due to runtime error: %s", exc)
-            time.sleep(tip_poll_interval)
+            if stop_controller.wait(tip_poll_interval):
+                notify_bot_stopping(bot.logger)
+                bot.logger.info("Signal bot stopped by user.")
+                return 0
     except KeyboardInterrupt:
         stop_controller.stop()
+        notify_bot_stopping(bot.logger)
         bot.logger.info("Signal bot stopped by user.")
         return 0
     return 0

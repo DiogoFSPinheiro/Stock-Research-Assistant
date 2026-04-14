@@ -107,7 +107,7 @@ class TelegramApprovalService:
             symbol = parts[1].upper() if len(parts) >= 2 else None
             kind = "tip_for_symbol" if symbol else "tip"
             return TelegramCommand(update_id=update.update_id, kind=kind, chat_id=update.chat_id, actor=update.actor, text=update.text, symbol=symbol)
-        if first in {"/top", "/tips"}:
+        if first in {"/top", "/tips", "top", "tips"}:
             limit = None
             if len(parts) >= 2:
                 try:
@@ -220,7 +220,7 @@ class TelegramApprovalService:
             return []
 
         params = {
-            "timeout": str(self.config.polling_timeout_seconds),
+            "timeout": str(min(self.config.polling_timeout_seconds, 5)),
             "limit": str(self.config.polling_limit),
         }
         if self.last_update_id is not None:

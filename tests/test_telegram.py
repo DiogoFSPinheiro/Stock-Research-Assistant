@@ -148,6 +148,7 @@ class TelegramApprovalServiceTests(unittest.TestCase):
         self.assertEqual(self.service.last_update_id, 10)
         self.assertIn("offset=11", self.get_calls[-1])
         self.assertEqual(self.get_calls[-1].count("offset="), 1)
+        self.assertIn("timeout=2", self.get_calls[-1])
 
     def test_poll_tip_requests_ignores_unrelated_commands(self) -> None:
         self.responses.append(
@@ -218,6 +219,30 @@ class TelegramApprovalServiceTests(unittest.TestCase):
         self.assertEqual(
             results,
             [TelegramCommand(update_id=57, kind="top_tips", chat_id=999, actor="alice", text="/top 3", symbol=None, limit=3)],
+        )
+
+    def test_poll_commands_parses_top_tips_limit_without_slash(self) -> None:
+        self.responses.append(
+            {
+                "ok": True,
+                "result": [
+                    {
+                        "update_id": 157,
+                        "message": {
+                            "chat": {"id": 999},
+                            "from": {"username": "alice"},
+                            "text": "top 5",
+                        },
+                    }
+                ],
+            }
+        )
+
+        results = self.service.poll_commands()
+
+        self.assertEqual(
+            results,
+            [TelegramCommand(update_id=157, kind="top_tips", chat_id=999, actor="alice", text="top 5", symbol=None, limit=5)],
         )
 
     def test_poll_commands_parses_specific_ticker_tip(self) -> None:
@@ -305,6 +330,24 @@ class TelegramApprovalServiceTests(unittest.TestCase):
 
         self.assertEqual(len(first), 1)
         self.assertEqual(second, [])
+
+    def test_poll_commands_caps_timeout_to_five_seconds(self) -> None:
+        slow_service = TelegramApprovalService(
+            TelegramConfig(
+                bot_token="token",
+                chat_id="chat",
+                polling_timeout_seconds=30,
+                polling_limit=25,
+                drop_pending_updates_on_start=False,
+            ),
+            signal_expiry_minutes=60,
+            http_post=lambda url, payload: None,
+            http_get=self._http_get,
+        )
+
+        slow_service.poll_commands()
+
+        self.assertIn("timeout=5", self.get_calls[-1])
 
     def test_poll_commands_swallows_get_updates_errors(self) -> None:
         self.service.http_get = lambda url: (_ for _ in ()).throw(TelegramApiError("Telegram getUpdates failed: timed out"))
