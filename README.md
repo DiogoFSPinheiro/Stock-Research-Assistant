@@ -11,6 +11,7 @@ Local Python bot that scans a stock universe from a file, estimates fair value u
 - Telegram delivery with fair value, margin of safety, quality score, timing score, and risk flags
 - On-demand Telegram tip requests with `/tip`, `/tip MSFT`, `/top 3`, or `give a tip`
 - On-demand deep stock analysis with `Analise MSFT` or `/analise MSFT`
+- On-demand portfolio daily-performance report with `portfolio` or `/portfolio`
 - Runtime stock universe updates without restarting the bot
 - JSON persistence for picks and analysis history
 - Unit test suite covering valuation math, filters, ranking logic, Telegram flow, and orchestration
@@ -24,7 +25,9 @@ Local Python bot that scans a stock universe from a file, estimates fair value u
 - Send `/tip MSFT` to force a fresh analysis for one ticker.
 - Send `/top 3` to request a ranked shortlist on demand.
 - Send `Analise MSFT` to run a compact multi-model stock analysis and add the ticker to your watch universe.
+- Send `portfolio` or `/portfolio` to get the day move of the stocks listed in `config/portfolio.txt`.
 - Send `add NVDA` or `/add NVDA` in Telegram to append a stock to the universe file and use it on the next scan.
+- After the U.S. market close, the bot can also send the portfolio report automatically once per trading day.
 - Market data is required for stocks; the project does not execute trades.
 - The code is designed to use `yfinance` by default for market data, so you can run it without a paid API key.
 - `synthetic` remains available for local dry runs and reproducible tests.
@@ -83,6 +86,7 @@ Once the bot is running, open Telegram and use:
 - `/tip` for one best current idea
 - `/tip MSFT` for a single-ticker check
 - `Analise MSFT` for FCF, DCF, intrinsic value, options, peer benchmark, and buy/hold/sell
+- `portfolio` for the current daily move of your owned stocks
 - `/add NVDA` to add a stock to the universe
 
 ## Configuration
@@ -90,7 +94,9 @@ Once the bot is running, open Telegram and use:
 - `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are required for delivery.
 - Use `/tip`, `/tip SYMBOL`, or `/top N` in Telegram to trigger immediate scans.
 - Use `Analise SYMBOL` or `/analise SYMBOL` to run a compact stock analysis and auto-add valid tickers to the watch universe.
+- Use `portfolio` or `/portfolio` to read holdings from `config/portfolio.txt` and get a daily move summary.
 - You can edit the stock universe file while the bot is running; it reloads the file automatically before scans.
+- `BOT_PORTFOLIO_PATH` points to the portfolio file, which defaults to `config/portfolio.txt`.
 - `MARKET_DATA_PROVIDER=yfinance` is the default live-data path; `synthetic` is still available for local dry runs.
 - `BOT_ALLOWED_STOCKS` defines the stock universe the picker will rank.
 - `BOT_STOCK_UNIVERSE_PATH` points to the text file containing the stock universe, one ticker per line.
@@ -120,3 +126,10 @@ The `Analise SYMBOL` command includes:
 - options trader sentiment
 - peer benchmark summary
 - final `BUY`, `HOLD`, or `SELL`
+
+The `portfolio` command includes:
+
+- current price
+- previous close
+- daily percentage move
+- a short possible reason for the move

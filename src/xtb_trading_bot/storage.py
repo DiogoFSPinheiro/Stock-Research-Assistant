@@ -28,6 +28,7 @@ class JsonStateStore:
                     "executions": [],
                     "performance": {"daily_pnl": 0.0, "weekly_pnl": 0.0},
                     "scheduled_scan": {"last_run_on": None},
+                    "portfolio_report": {"last_run_on": None},
                 }
             )
 
@@ -122,6 +123,23 @@ class JsonStateStore:
             scheduled_scan = {}
         scheduled_scan["last_run_on"] = day
         state["scheduled_scan"] = scheduled_scan
+        self._save(state)
+
+    def get_last_portfolio_report_on(self) -> str | None:
+        state = self._load()
+        portfolio_report = state.get("portfolio_report", {})
+        if not isinstance(portfolio_report, dict):
+            return None
+        value = portfolio_report.get("last_run_on")
+        return value if isinstance(value, str) and value else None
+
+    def mark_portfolio_report_on(self, day: str) -> None:
+        state = self._load()
+        portfolio_report = state.get("portfolio_report")
+        if not isinstance(portfolio_report, dict):
+            portfolio_report = {}
+        portfolio_report["last_run_on"] = day
+        state["portfolio_report"] = portfolio_report
         self._save(state)
 
     def _load(self) -> dict[str, Any]:

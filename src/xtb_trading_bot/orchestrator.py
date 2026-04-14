@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 import logging
+from pathlib import Path
 from typing import Callable
 
-from .config import AppConfig, ConfigError, append_stock_to_universe, refresh_stock_universe
+from .config import AppConfig, ConfigError, append_stock_to_universe, load_portfolio_symbols, refresh_stock_universe
 from .domain import ApprovalStatus, AssetClass, SignalSide, StockAnalysisReport
 from .instruments import InstrumentFilter
 from .interfaces import ApprovalService, MarketDataProvider, StateStore
@@ -132,7 +133,16 @@ class TradingBot:
 
     def list_top_candidates(self, limit: int = 5, allow_repeat: bool = True) -> list[tuple[object, object]]:
         candidates = self._collect_candidates(allow_repeat=allow_repeat)
-        ranked = sorted(candidates, key=self._candidate_rank, reverse=True)
+        best_by_symbol: dict[str, tuple[object, object]] = {}
+        for candidate in candidates:
+            signal, _proposal = candidate
+            symbol = getattr(signal, "symbol", None)
+            if not symbol:
+                continue
+            current_best = best_by_symbol.get(symbol)
+            if current_best is None or self._candidate_rank(candidate) > self._candidate_rank(current_best):
+                best_by_symbol[symbol] = candidate
+        ranked = sorted(best_by_symbol.values(), key=self._candidate_rank, reverse=True)
         return ranked[:limit]
 
     def send_tip(
@@ -250,6 +260,74 @@ class TradingBot:
                 return 0
         return 1
 
+    def send_portfolio_report(self, chat_id: str | int | None = None) -> int:
+        if not hasattr(self.approvals, "publish_text"):
+            return 0
+        self.logger.info("Building portfolio daily performance report")
+        symbols = self.portfolio_symbols()
+        if not symbols:
+            try:
+                self.approvals.publish_text(
+                    "PORTFOLIO\nNo portfolio symbols configured right now.",
+                    chat_id=chat_id,
+                )
+            except TelegramApiError as exc:
+                self.logger.warning("Telegram publish failed for portfolio response: %s", exc)
+            return 0
+
+        lines = ["PORTFOLIO"]
+        generated = 0
+        up_count = 0
+        down_count = 0
+        neutral_count = 0
+        detail_lines: list[str] = []
+        for symbol in symbols:
+            try:
+                candles = self.market_data.get_candles(symbol, "D1", 2)
+                if len(candles) < 2:
+                    raise MarketDataError(f"Not enough daily candles for {symbol}.")
+                previous_close = candles[-2].close
+                current_price = candles[-1].close
+                move_pct = ((current_price - previous_close) / previous_close) if previous_close else None
+                fundamentals = self.market_data.get_stock_fundamentals(symbol)
+            except MarketDataError as exc:
+                self.logger.warning("Portfolio data unavailable for %s: %s", symbol, exc)
+                neutral_count += 1
+                detail_lines.extend([f"{symbol}", "Daily move: n/a", "Possible reason: market data unavailable", ""])
+                continue
+            company_name = fundamentals.company_name or symbol
+            if move_pct is None:
+                neutral_count += 1
+            elif move_pct > 0:
+                up_count += 1
+            elif move_pct < 0:
+                down_count += 1
+            else:
+                neutral_count += 1
+            detail_lines.extend(
+                [
+                    f"{company_name} ({symbol})",
+                    f"Current price: {current_price:.2f}",
+                    f"Previous close: {previous_close:.2f}",
+                    f"Daily move: {self._format_pct(move_pct)}",
+                    f"Possible reason: {self._portfolio_reason(fundamentals, move_pct)}",
+                    "",
+                ]
+            )
+            generated += 1
+        lines.extend([f"Up: {up_count} , Down: {down_count} , Neutral: {neutral_count}", ""])
+        lines.extend(detail_lines)
+
+        try:
+            self.approvals.publish_text("\n".join(lines).strip(), chat_id=chat_id)
+        except TelegramApiError as exc:
+            self.logger.warning("Telegram publish failed for portfolio response: %s", exc)
+            return 0
+        return generated
+
+    def portfolio_symbols(self) -> tuple[str, ...]:
+        return load_portfolio_symbols(self._portfolio_path())
+
     def scan(self) -> int:
         if hasattr(self.approvals, "publish_text"):
             return self.send_top_tips(limit=3)
@@ -263,6 +341,10 @@ class TradingBot:
                 self.state_store.mark_expired(decision.proposal_id)
             processed += 1
         return processed
+
+    def _portfolio_path(self) -> Path:
+        path = getattr(self.config, "portfolio_path", None)
+        return Path(path) if path is not None else Path("config/portfolio.txt")
 
     def _format_horizon(self, signal: object) -> str:
         horizon_days = getattr(signal, "horizon_days", None)
@@ -325,3 +407,28 @@ class TradingBot:
                 universe_line,
             ]
         )
+
+    def _portfolio_reason(self, fundamentals: object, move_pct: float | None) -> str:
+        if move_pct is None:
+            return "insufficient price history"
+        revenue_growth = getattr(fundamentals, "revenue_growth", None)
+        earnings_growth = getattr(fundamentals, "earnings_growth", None)
+        debt_to_equity = getattr(fundamentals, "debt_to_equity", None)
+        margin_of_safety = None
+        current_price = getattr(fundamentals, "current_price", None)
+        target_mean_price = getattr(fundamentals, "target_mean_price", None)
+        if current_price and target_mean_price:
+            margin_of_safety = (target_mean_price - current_price) / current_price
+        if move_pct >= 0.03:
+            if revenue_growth is not None and revenue_growth > 0.08:
+                return "strong growth profile likely helped sentiment"
+            if margin_of_safety is not None and margin_of_safety > 0.15:
+                return "valuation upside may be attracting buyers"
+            return "positive market sentiment likely supported the move"
+        if move_pct <= -0.03:
+            if debt_to_equity is not None and debt_to_equity > 100:
+                return "higher leverage may be pressuring sentiment"
+            if earnings_growth is not None and earnings_growth < 0:
+                return "weaker earnings profile may be weighing on shares"
+            return "profit taking or weaker market sentiment may explain the drop"
+        return "normal day-to-day price movement"

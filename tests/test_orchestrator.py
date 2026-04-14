@@ -58,6 +58,7 @@ class TradingBotTests(unittest.TestCase):
             auto_scan_minute=0,
             log_level="INFO",
             storage_path=self.state_path,
+            portfolio_path=self.universe_path,
         )
         self.state_store = JsonStateStore(self.config.storage_path)
         self.market_data = RichSyntheticMarketDataProvider(self.config.universe)
@@ -158,6 +159,12 @@ class TradingBotTests(unittest.TestCase):
         self.assertGreaterEqual(len(ranked), 1)
         self.assertEqual(ranked[0][0].symbol, "MSFT")
 
+    def test_list_top_candidates_returns_each_symbol_only_once(self) -> None:
+        ranked = self.bot.list_top_candidates(limit=5, allow_repeat=True)
+
+        symbols = [signal.symbol for signal, _proposal in ranked]
+        self.assertEqual(len(symbols), len(set(symbols)))
+
     def test_send_top_tips_reports_empty_when_everything_fails_quality_screen(self) -> None:
         sent_messages: list[str] = []
         self.bot.approvals.http_post = lambda url, payload: sent_messages.append(payload["text"])
@@ -257,6 +264,20 @@ class TradingBotTests(unittest.TestCase):
             self.bot.add_stock("BAD.LS")
 
         self.assertNotIn("BAD.LS", self.bot.config.universe.allowed_stocks)
+
+    def test_send_portfolio_report_publishes_daily_moves(self) -> None:
+        sent_messages: list[str] = []
+        self.bot.approvals.http_post = lambda url, payload: sent_messages.append(payload["text"])
+
+        generated = self.bot.send_portfolio_report(chat_id="chat")
+
+        self.assertEqual(generated, 2)
+        self.assertEqual(len(sent_messages), 1)
+        self.assertIn("PORTFOLIO", sent_messages[0])
+        self.assertIn("Up: 2 , Down: 0 , Neutral: 0", sent_messages[0])
+        self.assertIn("Apple Inc. (AAPL)", sent_messages[0])
+        self.assertIn("Daily move:", sent_messages[0])
+        self.assertIn("Possible reason:", sent_messages[0])
 
 
 if __name__ == "__main__":

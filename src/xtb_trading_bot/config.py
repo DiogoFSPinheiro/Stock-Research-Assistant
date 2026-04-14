@@ -62,6 +62,10 @@ def load_stock_universe(path: str | Path) -> tuple[str, ...]:
     return tuple(unique)
 
 
+def load_portfolio_symbols(path: str | Path) -> tuple[str, ...]:
+    return load_stock_universe(path)
+
+
 def append_stock_to_universe(path: str | Path, symbol: str) -> tuple[bool, str]:
     normalized = normalize_stock_symbol(symbol)
     if not normalized:
@@ -144,6 +148,7 @@ class AppConfig:
     auto_scan_minute: int
     log_level: str
     storage_path: Path
+    portfolio_path: Path = Path("config/portfolio.txt")
 
     @classmethod
     def from_env(cls) -> "AppConfig":
@@ -185,6 +190,7 @@ class AppConfig:
             auto_scan_minute=int(os.getenv("BOT_AUTO_SCAN_MINUTE", "0")),
             log_level=os.getenv("BOT_LOG_LEVEL", "INFO"),
             storage_path=Path(os.getenv("BOT_STORAGE_PATH", "data/state.json")),
+            portfolio_path=Path(os.getenv("BOT_PORTFOLIO_PATH", "config/portfolio.txt")),
         )
 
     def validate(self) -> None:

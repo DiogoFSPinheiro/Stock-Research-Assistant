@@ -5,6 +5,7 @@ from logging import Logger
 from datetime import datetime
 import threading
 import time
+from zoneinfo import ZoneInfo
 
 from .config import AppConfig, ConfigError
 from .instruments import InstrumentFilter
@@ -94,6 +95,16 @@ def notify_bot_stopping(logger: Logger) -> None:
     logger.info("Stopping bot...")
 
 
+def notify_portfolio_report_start(bot: TradingBot) -> None:
+    message = "PORTFOLIO daily report started. Please wait before sending more requests."
+    bot.logger.info(message)
+    if hasattr(bot.approvals, "publish_text"):
+        try:
+            bot.approvals.publish_text(message)
+        except TelegramApiError as exc:
+            bot.logger.warning("Telegram publish failed for portfolio start notice: %s", exc)
+
+
 def log_received_command(logger: Logger, command: object) -> None:
     kind = getattr(command, "kind", "tip")
     text = " ".join(str(getattr(command, "text", "")).split()) or kind
@@ -113,6 +124,9 @@ def log_received_command(logger: Logger, command: object) -> None:
         symbol = getattr(command, "symbol", None) or "unknown"
         logger.info("Received Telegram command: %s. Adding %s to the universe.", text, symbol)
         return
+    if kind == "portfolio":
+        logger.info("Received Telegram command: %s. Building portfolio daily performance report.", text)
+        return
     logger.info("Received Telegram command: %s.", text)
 
 
@@ -130,6 +144,20 @@ def should_run_scheduled_scan(bot: TradingBot, now: datetime | None = None) -> b
         return False
     today_key = now.date().isoformat()
     return bot.state_store.get_last_scheduled_scan_on() != today_key
+
+
+def should_run_portfolio_report(bot: TradingBot, now: datetime | None = None) -> bool:
+    now = now or datetime.now().astimezone()
+    if not getattr(bot, "portfolio_symbols", lambda: ())():
+        return False
+    ny_now = now.astimezone(ZoneInfo("America/New_York"))
+    if ny_now.weekday() >= 5:
+        return False
+    market_close = ny_now.replace(hour=16, minute=0, second=0, microsecond=0)
+    if ny_now < market_close:
+        return False
+    report_day = ny_now.date().isoformat()
+    return bot.state_store.get_last_portfolio_report_on() != report_day
 
 
 def main() -> int:
@@ -188,6 +216,15 @@ def main() -> int:
                         return 0
                     bot.state_store.mark_scheduled_scan_on(datetime.now().astimezone().date().isoformat())
                     ran_scheduled_scan = True
+                elif not commands and should_run_portfolio_report(bot):
+                    notify_portfolio_report_start(bot)
+                    generated += bot.send_portfolio_report()
+                    if stop_controller.should_stop():
+                        notify_bot_stopping(bot.logger)
+                        bot.logger.info("Signal bot stopped by user.")
+                        return 0
+                    report_day = datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+                    bot.state_store.mark_portfolio_report_on(report_day)
                 for command in commands:
                     log_received_command(bot.logger, command)
                     kind = getattr(command, "kind", "tip")
@@ -241,6 +278,11 @@ def main() -> int:
                                     f"Unable to analyze stock: {exc}",
                                     chat_id=getattr(command, "chat_id", None),
                                 )
+                        continue
+                    if kind == "portfolio":
+                        generated += bot.send_portfolio_report(
+                            chat_id=getattr(command, "chat_id", None),
+                        )
                         continue
                     generated += bot.send_tip(
                         chat_id=getattr(command, "chat_id", None),

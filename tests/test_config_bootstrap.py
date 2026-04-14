@@ -48,6 +48,7 @@ class ConfigBootstrapTests(unittest.TestCase):
             BOT_ALLOWED_STOCKS=" AAPL , MSFT , ",
             BOT_CONTEXT_SYMBOLS=" SPX500 , GOLD ",
             BOT_ALLOWED_TIMEFRAMES=" H4 , D1 ",
+            BOT_PORTFOLIO_PATH="config/portfolio.txt",
             TELEGRAM_DROP_PENDING_UPDATES_ON_START="yes",
         ):
             config = AppConfig.from_env()
@@ -68,6 +69,7 @@ class ConfigBootstrapTests(unittest.TestCase):
         self.assertEqual(config.auto_scan_hour, 9)
         self.assertEqual(config.auto_scan_minute, 0)
         self.assertEqual(config.storage_path, Path("data/state.json"))
+        self.assertEqual(config.portfolio_path, Path("config/portfolio.txt"))
 
     def test_build_application_bootstraps_synthetic_mode_without_network(self) -> None:
         class FakeApprovalService:
@@ -109,6 +111,7 @@ class ConfigBootstrapTests(unittest.TestCase):
         values = _parse_env_file(Path(".env.example"))
 
         self.assertEqual(values["BOT_MODE"], "signal_only")
+        self.assertEqual(values["BOT_PORTFOLIO_PATH"], "config/portfolio.txt")
         self.assertEqual(values["MARKET_DATA_PROVIDER"], "yfinance")
         self.assertEqual(values["YFINANCE_PERIOD"], "1y")
         self.assertEqual(values["YFINANCE_INTERVAL"], "1d")

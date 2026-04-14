@@ -73,3 +73,9 @@ class StateStore(Protocol):
 
     def mark_scheduled_scan_on(self, day: str) -> None:
         ...
+
+    def get_last_portfolio_report_on(self) -> str | None:
+        ...
+
+    def mark_portfolio_report_on(self, day: str) -> None:
+        ...

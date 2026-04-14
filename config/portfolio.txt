@@ -1,0 +1,8 @@
+# Add one owned stock ticker per line.
+# Example:
+AMZN
+EDP.LS
+MT
+MNST
+ABBV
+FN
