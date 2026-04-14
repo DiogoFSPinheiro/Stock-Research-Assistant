@@ -318,6 +318,30 @@ class TelegramApprovalServiceTests(unittest.TestCase):
             [TelegramCommand(update_id=159, kind="portfolio", chat_id=999, actor="alice", text="portfolio", symbol=None, limit=None)],
         )
 
+    def test_poll_commands_parses_help(self) -> None:
+        self.responses.append(
+            {
+                "ok": True,
+                "result": [
+                    {
+                        "update_id": 160,
+                        "message": {
+                            "chat": {"id": 999},
+                            "from": {"username": "alice"},
+                            "text": "/help",
+                        },
+                    }
+                ],
+            }
+        )
+
+        results = self.service.poll_commands()
+
+        self.assertEqual(
+            results,
+            [TelegramCommand(update_id=160, kind="help", chat_id=999, actor="alice", text="/help", symbol=None, limit=None)],
+        )
+
     def test_poll_commands_dedupes_identical_repeated_command(self) -> None:
         self.responses.extend(
             [

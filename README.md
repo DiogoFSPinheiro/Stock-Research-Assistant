@@ -88,6 +88,7 @@ Once the bot is running, open Telegram and use:
 - `Analise MSFT` for FCF, DCF, intrinsic value, options, peer benchmark, and buy/hold/sell
 - `portfolio` for the current daily move of your owned stocks
 - `/add NVDA` to add a stock to the universe
+- `help` for the command list
 
 ## Configuration
 
@@ -95,6 +96,7 @@ Once the bot is running, open Telegram and use:
 - Use `/tip`, `/tip SYMBOL`, or `/top N` in Telegram to trigger immediate scans.
 - Use `Analise SYMBOL` or `/analise SYMBOL` to run a compact stock analysis and auto-add valid tickers to the watch universe.
 - Use `portfolio` or `/portfolio` to read holdings from `config/portfolio.txt` and get a daily move summary.
+- Use `help` or `/help` to see the available Telegram commands.
 - You can edit the stock universe file while the bot is running; it reloads the file automatically before scans.
 - `BOT_PORTFOLIO_PATH` points to the portfolio file, which defaults to `config/portfolio.txt`.
 - `MARKET_DATA_PROVIDER=yfinance` is the default live-data path; `synthetic` is still available for local dry runs.

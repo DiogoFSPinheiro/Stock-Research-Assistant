@@ -279,6 +279,19 @@ class TradingBotTests(unittest.TestCase):
         self.assertIn("Daily move:", sent_messages[0])
         self.assertIn("Possible reason:", sent_messages[0])
 
+    def test_send_help_publishes_command_list(self) -> None:
+        sent_messages: list[str] = []
+        self.bot.approvals.http_post = lambda url, payload: sent_messages.append(payload["text"])
+
+        generated = self.bot.send_help(chat_id="chat")
+
+        self.assertEqual(generated, 1)
+        self.assertEqual(len(sent_messages), 1)
+        self.assertIn("HELP", sent_messages[0])
+        self.assertIn("/top 5 or top 5", sent_messages[0])
+        self.assertIn("portfolio or /portfolio", sent_messages[0])
+        self.assertIn("help or /help", sent_messages[0])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -143,6 +143,14 @@ class TelegramApprovalService:
                 actor=update.actor,
                 text=update.text,
             )
+        if first in {"/help", "help"}:
+            return TelegramCommand(
+                update_id=update.update_id,
+                kind="help",
+                chat_id=update.chat_id,
+                actor=update.actor,
+                text=update.text,
+            )
         return None
 
     def _parse_update(self, update: dict) -> TelegramUpdate | None:

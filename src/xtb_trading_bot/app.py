@@ -127,6 +127,9 @@ def log_received_command(logger: Logger, command: object) -> None:
     if kind == "portfolio":
         logger.info("Received Telegram command: %s. Building portfolio daily performance report.", text)
         return
+    if kind == "help":
+        logger.info("Received Telegram command: %s. Showing help message.", text)
+        return
     logger.info("Received Telegram command: %s.", text)
 
 
@@ -281,6 +284,11 @@ def main() -> int:
                         continue
                     if kind == "portfolio":
                         generated += bot.send_portfolio_report(
+                            chat_id=getattr(command, "chat_id", None),
+                        )
+                        continue
+                    if kind == "help":
+                        generated += bot.send_help(
                             chat_id=getattr(command, "chat_id", None),
                         )
                         continue

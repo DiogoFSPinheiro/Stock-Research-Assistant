@@ -325,6 +325,40 @@ class TradingBot:
             return 0
         return generated
 
+    def send_help(self, chat_id: str | int | None = None) -> int:
+        if not hasattr(self.approvals, "publish_text"):
+            return 0
+        lines = [
+            "HELP",
+            "",
+            "/top 5 or top 5",
+            "Get the current TOP QUALITY-VALUE IDEAS shortlist.",
+            "",
+            "/tip",
+            "Get one best current idea.",
+            "",
+            "/tip MSFT",
+            "Check one specific stock quickly.",
+            "",
+            "Analise MSFT or /analise MSFT",
+            "Run the detailed stock analysis with valuation models and BUY/HOLD/SELL.",
+            "",
+            "portfolio or /portfolio",
+            "Show the daily performance of the stocks in config/portfolio.txt.",
+            "",
+            "add NVDA or /add NVDA",
+            "Add a stock to your watch universe.",
+            "",
+            "help or /help",
+            "Show this command list.",
+        ]
+        try:
+            self.approvals.publish_text("\n".join(lines), chat_id=chat_id)
+        except TelegramApiError as exc:
+            self.logger.warning("Telegram publish failed for help response: %s", exc)
+            return 0
+        return 1
+
     def portfolio_symbols(self) -> tuple[str, ...]:
         return load_portfolio_symbols(self._portfolio_path())
 
