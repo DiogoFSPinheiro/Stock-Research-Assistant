@@ -23,6 +23,7 @@ class RiskEngineTests(unittest.TestCase):
         self.signal = Signal(
             signal_id="sig123",
             symbol="EURUSD",
+            company_name=None,
             asset_class=AssetClass.FX,
             side=SignalSide.BUY,
             timeframe="H4",

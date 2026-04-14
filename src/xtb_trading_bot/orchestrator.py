@@ -196,9 +196,10 @@ class TradingBot:
             header = f"{header} ({len(candidates)} of {limit} passed the screen)"
         lines = [header, ""]
         for index, (signal, _proposal) in enumerate(candidates, start=1):
+            company_label = self._format_company_label(signal)
             lines.extend(
                 [
-                    f"{index}. {signal.symbol}",
+                    f"{index}. {company_label}",
                     f"Best horizon: {self._format_horizon(signal)}",
                     f"Entry price: {self._format_price(getattr(signal, 'entry', None))}",
                     f"Fair value: {self._format_price(getattr(signal, 'fair_value', None))}",
@@ -286,6 +287,13 @@ class TradingBot:
 
     def _format_risks(self, flags: tuple[str, ...] | list[str]) -> str:
         return "none flagged" if not flags else ", ".join(str(flag) for flag in flags)
+
+    def _format_company_label(self, signal: object) -> str:
+        symbol = getattr(signal, "symbol", "n/a")
+        company_name = getattr(signal, "company_name", None)
+        if company_name:
+            return f"{symbol}: {company_name} ({symbol})"
+        return str(symbol)
 
     def _format_stock_analysis(self, report: StockAnalysisReport, added: bool, total: int, auto_add_applied: bool) -> str:
         if auto_add_applied and added:

@@ -191,6 +191,7 @@ class UndervaluedStockEngine:
                 Signal(
                     signal_id=digest,
                     symbol=instrument.symbol,
+                    company_name=fundamentals.company_name,
                     asset_class=instrument.asset_class,
                     side=SignalSide.BUY,
                     timeframe=timeframe,
@@ -236,6 +237,7 @@ class UndervaluedStockEngine:
         return Signal(
             signal_id=digest,
             symbol=instrument.symbol,
+            company_name=None,
             asset_class=instrument.asset_class,
             side=SignalSide.NO_TRADE,
             timeframe=timeframe,

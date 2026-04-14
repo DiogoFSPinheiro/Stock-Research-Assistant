@@ -56,6 +56,7 @@ class Candle:
 class Signal:
     signal_id: str
     symbol: str
+    company_name: str | None
     asset_class: AssetClass
     side: SignalSide
     timeframe: str

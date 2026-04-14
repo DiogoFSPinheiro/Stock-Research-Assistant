@@ -138,6 +138,7 @@ class TradingBotTests(unittest.TestCase):
         self.assertEqual(len(sent_messages), 1)
         self.assertIn("TOP QUALITY-VALUE IDEAS", sent_messages[0])
         self.assertIn("1.", sent_messages[0])
+        self.assertIn("Microsoft Corporation (MSFT)", sent_messages[0])
         self.assertIn("Margin of safety:", sent_messages[0])
         self.assertIn("Quality score:", sent_messages[0])
 

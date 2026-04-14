@@ -60,6 +60,7 @@ class TelegramApprovalServiceTests(unittest.TestCase):
         self.signal = Signal(
             signal_id="sig1",
             symbol="AAPL",
+            company_name="Apple Inc.",
             asset_class=AssetClass.STOCK,
             side=SignalSide.BUY,
             timeframe="D1",
