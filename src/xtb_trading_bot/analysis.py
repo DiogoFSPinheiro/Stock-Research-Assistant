@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from statistics import mean, median
 
-from .domain import StockAnalysisReport, StockFundamentals
+from .domain import CompanyResearchReport, StockFundamentals
 from .valuation import compute_fair_value
 
 
@@ -99,12 +99,61 @@ def _options_sentiment_from_ratio(put_call_ratio: float | None) -> str:
     return "Neutral"
 
 
+def _build_thesis(
+    fundamentals: StockFundamentals,
+    margin_of_safety: float | None,
+    benchmark_score: float,
+    valuation_reason: str,
+) -> str:
+    company_label = fundamentals.company_name or fundamentals.symbol
+    if margin_of_safety is None:
+        return f"{company_label} needs more complete valuation inputs before a clear thesis can be formed."
+    if margin_of_safety >= 0.2 and benchmark_score >= 0.55:
+        return f"{company_label} screens as an undervalued quality business with supportive peer-relative fundamentals."
+    if margin_of_safety >= 0.1:
+        return f"{company_label} looks modestly undervalued, supported mainly by {valuation_reason.lower()}."
+    if margin_of_safety <= -0.1:
+        return f"{company_label} looks fully valued to expensive versus the current quality and growth profile."
+    return f"{company_label} is close to fair value, so the case depends on execution improving from here."
+
+
+def _build_catalysts(
+    fundamentals: StockFundamentals,
+    margin_of_safety: float | None,
+    options_sentiment: str,
+) -> tuple[str, ...]:
+    catalysts: list[str] = []
+    if fundamentals.revenue_growth is not None and fundamentals.revenue_growth > 0.08:
+        catalysts.append("Revenue growth remains strong enough to support multiple expansion.")
+    if fundamentals.earnings_growth is not None and fundamentals.earnings_growth > 0.1:
+        catalysts.append("Earnings growth is healthy, which could unlock upside if it holds.")
+    if fundamentals.free_cash_flow_yield is not None and fundamentals.free_cash_flow_yield > 0.05:
+        catalysts.append("Free-cash-flow yield is attractive relative to a typical quality compounder.")
+    if margin_of_safety is not None and margin_of_safety > 0.15:
+        catalysts.append("A healthy margin of safety gives room for sentiment to improve.")
+    if options_sentiment == "Bullish":
+        catalysts.append("Options positioning is leaning constructive near-term.")
+    if not catalysts:
+        catalysts.append("No strong catalyst stands out from the available dataset.")
+    return tuple(catalysts[:3])
+
+
+def _build_watchlist_action(recommendation: str, margin_of_safety: float | None) -> str:
+    if recommendation == "BUY":
+        return "Add to watchlist now"
+    if margin_of_safety is not None and margin_of_safety >= 0.05:
+        return "Keep on watchlist"
+    if recommendation == "SELL":
+        return "Do not add to watchlist"
+    return "Review on the next earnings update"
+
+
 def build_stock_analysis_report(
     symbol: str,
     fundamentals: StockFundamentals,
     peers: list[StockFundamentals],
     put_call_ratio: float | None,
-) -> StockAnalysisReport:
+) -> CompanyResearchReport:
     valuation = compute_fair_value(fundamentals)
     fcf_value = estimate_fcf_value(fundamentals)
     dcf_value = estimate_dcf_value(fundamentals)
@@ -140,7 +189,18 @@ def build_stock_analysis_report(
     else:
         key_risk = valuation.primary_risk
 
-    return StockAnalysisReport(
+    thesis = _build_thesis(fundamentals, margin_of_safety, benchmark_score, valuation.primary_reason)
+    catalysts = _build_catalysts(fundamentals, margin_of_safety, options_sentiment)
+    watchlist_action = _build_watchlist_action(recommendation, margin_of_safety)
+    if recommendation == "BUY":
+        watchlist_status = "High-priority watchlist candidate"
+    elif recommendation == "HOLD":
+        watchlist_status = "Watchlist candidate"
+    else:
+        watchlist_status = "Not a priority watchlist candidate"
+    what_could_go_wrong = key_risk
+
+    return CompanyResearchReport(
         symbol=symbol,
         company_name=fundamentals.company_name,
         current_price=round(fundamentals.current_price, 2),
@@ -156,4 +216,9 @@ def build_stock_analysis_report(
         benchmark_score=benchmark_score,
         recommendation=recommendation,
         key_risk=key_risk,
+        thesis=thesis,
+        catalysts=catalysts,
+        what_could_go_wrong=what_could_go_wrong,
+        watchlist_status=watchlist_status,
+        watchlist_action=watchlist_action,
     )

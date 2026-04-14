@@ -82,7 +82,7 @@ def build_application(config: AppConfig | None = None) -> TradingBot:
 
 
 def notify_scheduled_scan_start(bot: TradingBot) -> None:
-    message = "TOP QUALITY-VALUE IDEAS cycle started. Please wait before sending more requests."
+    message = "Top research ideas cycle started. Please wait before sending more requests."
     bot.logger.info(message)
     if hasattr(bot.approvals, "publish_text"):
         try:
@@ -110,19 +110,19 @@ def log_received_command(logger: Logger, command: object) -> None:
     text = " ".join(str(getattr(command, "text", "")).split()) or kind
     if kind == "top_tips":
         limit = getattr(command, "limit", None) or 5
-        logger.info("Received Telegram command: %s. Building shortlist with limit=%s.", text, limit)
+        logger.info("Received Telegram command: %s. Building research shortlist with limit=%s.", text, limit)
         return
     if kind == "stock_analysis":
         symbol = getattr(command, "symbol", None) or "unknown"
-        logger.info("Received Telegram command: %s. Starting detailed analysis for %s.", text, symbol)
+        logger.info("Received Telegram command: %s. Starting company research for %s.", text, symbol)
         return
     if kind == "tip_for_symbol":
         symbol = getattr(command, "symbol", None) or "unknown"
-        logger.info("Received Telegram command: %s. Starting tip request for %s.", text, symbol)
+        logger.info("Received Telegram command: %s. Starting quick research check for %s.", text, symbol)
         return
-    if kind == "add_stock":
+    if kind == "watch_stock":
         symbol = getattr(command, "symbol", None) or "unknown"
-        logger.info("Received Telegram command: %s. Adding %s to the universe.", text, symbol)
+        logger.info("Received Telegram command: %s. Adding %s to the watchlist.", text, symbol)
         return
     if kind == "portfolio":
         logger.info("Received Telegram command: %s. Building portfolio daily performance report.", text)
@@ -179,7 +179,7 @@ def main() -> int:
             return 3
 
     bot.logger.info(
-        "Starting undervalued stock picker with provider=%s, symbols=%s stocks, auto_scan=%02d:%02d Mon-Fri",
+        "Starting research assistant with provider=%s, symbols=%s watchlist names, auto_scan=%02d:%02d Mon-Fri",
         bot.config.market_data.provider,
         len(bot.config.universe.allowed_stocks),
         bot.config.auto_scan_hour,
@@ -252,20 +252,20 @@ def main() -> int:
                             limit=getattr(command, "limit", None) or 5,
                         )
                         continue
-                    if kind == "add_stock":
+                    if kind == "watch_stock":
                         try:
-                            added, symbol, total = bot.add_stock(getattr(command, "symbol", "") or "")
+                            added, symbol, total = bot.watch_stock(getattr(command, "symbol", "") or "")
                             if hasattr(bot.approvals, "publish_text"):
                                 message = (
-                                    f"Added {symbol} to your stock universe. Total stocks: {total}."
+                                    f"Added {symbol} to your research watchlist. Total watched stocks: {total}."
                                     if added
-                                    else f"{symbol} is already in your stock universe. Total stocks: {total}."
+                                    else f"{symbol} is already on your research watchlist. Total watched stocks: {total}."
                                 )
                                 bot.approvals.publish_text(message, chat_id=getattr(command, "chat_id", None))
                         except ConfigError as exc:
                             if hasattr(bot.approvals, "publish_text"):
                                 bot.approvals.publish_text(
-                                    f"Unable to add stock: {exc}",
+                                    f"Unable to update watchlist: {exc}",
                                     chat_id=getattr(command, "chat_id", None),
                                 )
                         continue

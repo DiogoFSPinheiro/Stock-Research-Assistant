@@ -10,7 +10,7 @@ from urllib import parse, request
 
 from .analysis import build_stock_analysis_report
 from .config import MarketDataConfig, UniverseConfig
-from .domain import AssetClass, Candle, ContextSnapshot, Instrument, PositionSnapshot, StockAnalysisReport, StockFundamentals
+from .domain import AssetClass, Candle, CompanyResearchReport, ContextSnapshot, Instrument, PositionSnapshot, StockFundamentals
 
 
 class MarketDataError(RuntimeError):
@@ -222,7 +222,7 @@ class SyntheticMarketDataProvider:
             target_mean_price=current_price * 1.18,
         )
 
-    def get_stock_analysis(self, symbol: str, peer_symbols: list[str]) -> StockAnalysisReport:
+    def get_stock_analysis(self, symbol: str, peer_symbols: list[str]) -> CompanyResearchReport:
         fundamentals = self.get_stock_fundamentals(symbol)
         peers = [self.get_stock_fundamentals(peer) for peer in peer_symbols if peer != symbol]
         return build_stock_analysis_report(symbol, fundamentals, peers, put_call_ratio=0.95)
@@ -244,7 +244,7 @@ class AlphaVantageMarketDataProvider:
     def get_stock_fundamentals(self, symbol: str) -> StockFundamentals:
         raise MarketDataError("Stock fundamentals are not supported for alpha_vantage in this runtime.")
 
-    def get_stock_analysis(self, symbol: str, peer_symbols: list[str]) -> StockAnalysisReport:
+    def get_stock_analysis(self, symbol: str, peer_symbols: list[str]) -> CompanyResearchReport:
         raise MarketDataError("Detailed stock analysis is not supported for alpha_vantage in this runtime.")
 
     def get_quote(self, symbol: str) -> float:
@@ -452,7 +452,7 @@ class YFinanceMarketDataProvider:
         self.fundamentals_cache[symbol] = (time.monotonic(), fundamentals)
         return fundamentals
 
-    def get_stock_analysis(self, symbol: str, peer_symbols: list[str]) -> StockAnalysisReport:
+    def get_stock_analysis(self, symbol: str, peer_symbols: list[str]) -> CompanyResearchReport:
         fundamentals = self.get_stock_fundamentals(symbol)
         peer_fundamentals: list[StockFundamentals] = []
         for peer_symbol in peer_symbols:

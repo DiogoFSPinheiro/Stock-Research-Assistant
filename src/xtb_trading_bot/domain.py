@@ -169,3 +169,11 @@ class StockAnalysisReport:
     benchmark_score: float
     recommendation: str
     key_risk: str
+    thesis: str = "No thesis available."
+    catalysts: tuple[str, ...] = ()
+    what_could_go_wrong: str = "Key risks are not available."
+    watchlist_status: str = "Not on watchlist"
+    watchlist_action: str = "Review before adding"
+
+
+CompanyResearchReport = StockAnalysisReport

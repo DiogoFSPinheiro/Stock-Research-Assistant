@@ -60,8 +60,8 @@ class TerminalStopControllerTests(unittest.TestCase):
         self.assertEqual(
             messages,
             [
-                "TOP QUALITY-VALUE IDEAS cycle started. Please wait before sending more requests.",
-                "TOP QUALITY-VALUE IDEAS cycle started. Please wait before sending more requests.",
+                "Top research ideas cycle started. Please wait before sending more requests.",
+                "Top research ideas cycle started. Please wait before sending more requests.",
             ],
         )
 
@@ -118,7 +118,7 @@ class TerminalStopControllerTests(unittest.TestCase):
 
         log_received_command(FakeLogger(), FakeCommand())
 
-        self.assertEqual(messages, ["Received Telegram command: /top 5. Building shortlist with limit=5."])
+        self.assertEqual(messages, ["Received Telegram command: /top 5. Building research shortlist with limit=5."])
 
     def test_should_run_scheduled_scan_only_once_on_weekday_after_schedule(self) -> None:
         class FakeConfig:

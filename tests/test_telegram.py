@@ -91,11 +91,11 @@ class TelegramApprovalServiceTests(unittest.TestCase):
     def test_publish_signal_sends_message(self) -> None:
         self.service.publish_signal(self.signal, self.proposal)
         self.assertEqual(len(self.calls), 1)
-        self.assertIn("Quality-Value Stock Pick", self.calls[0][1]["text"])
-        self.assertIn("Ticker: AAPL", self.calls[0][1]["text"])
+        self.assertIn("Research idea", self.calls[0][1]["text"])
+        self.assertIn("Company: Apple Inc. (AAPL)", self.calls[0][1]["text"])
         self.assertIn("Best Horizon:", self.calls[0][1]["text"])
-        self.assertIn("Entry Price: 100.0000", self.calls[0][1]["text"])
-        self.assertIn("Exit Price: 110.0000", self.calls[0][1]["text"])
+        self.assertIn("Research Window: D1", self.calls[0][1]["text"])
+        self.assertNotIn("Entry Price:", self.calls[0][1]["text"])
 
     def test_poll_tip_requests_returns_tip_command_without_replying(self) -> None:
         self.responses.append(
@@ -173,7 +173,7 @@ class TelegramApprovalServiceTests(unittest.TestCase):
         self.assertEqual(results, [])
         self.assertEqual(self.service.last_update_id, 55)
 
-    def test_poll_commands_parses_add_stock(self) -> None:
+    def test_poll_commands_parses_watchlist_alias(self) -> None:
         self.responses.append(
             {
                 "ok": True,
@@ -194,9 +194,33 @@ class TelegramApprovalServiceTests(unittest.TestCase):
 
         self.assertEqual(
             results,
-            [TelegramCommand(update_id=56, kind="add_stock", chat_id=999, actor="alice", text='add "NVDA"', symbol="NVDA")],
+            [TelegramCommand(update_id=56, kind="watch_stock", chat_id=999, actor="alice", text='add "NVDA"', symbol="NVDA")],
         )
         self.assertEqual(self.service.last_update_id, 56)
+
+    def test_poll_commands_parses_watch_stock(self) -> None:
+        self.responses.append(
+            {
+                "ok": True,
+                "result": [
+                    {
+                        "update_id": 156,
+                        "message": {
+                            "chat": {"id": 999},
+                            "from": {"username": "alice"},
+                            "text": '/watch "NVDA"',
+                        },
+                    }
+                ],
+            }
+        )
+
+        results = self.service.poll_commands()
+
+        self.assertEqual(
+            results,
+            [TelegramCommand(update_id=156, kind="watch_stock", chat_id=999, actor="alice", text='/watch "NVDA"', symbol="NVDA")],
+        )
 
     def test_poll_commands_parses_top_tips_limit(self) -> None:
         self.responses.append(

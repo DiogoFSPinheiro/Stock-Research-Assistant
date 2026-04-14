@@ -6,10 +6,11 @@ from pathlib import Path
 from typing import Callable
 
 from .config import AppConfig, ConfigError, append_stock_to_universe, load_portfolio_symbols, refresh_stock_universe
-from .domain import ApprovalStatus, AssetClass, SignalSide, StockAnalysisReport
+from .domain import ApprovalStatus, AssetClass, SignalSide
 from .instruments import InstrumentFilter
 from .interfaces import ApprovalService, MarketDataProvider, StateStore
 from .market_data import MarketDataError
+from .reporting import format_pct, render_company_report, render_shortlist
 from .risk import RiskEngine, RiskError
 from .strategy import UndervaluedStockEngine
 from .telegram_service import TelegramApiError
@@ -53,6 +54,9 @@ class TradingBot:
         added, normalized = append_stock_to_universe(self.config.universe.stock_universe_path, symbol)
         total = self.refresh_universe()
         return added, normalized, total
+
+    def watch_stock(self, symbol: str) -> tuple[bool, str, int]:
+        return self.add_stock(symbol)
 
     def _collect_candidates(
         self,
@@ -188,45 +192,20 @@ class TradingBot:
     def send_top_tips(self, chat_id: str | int | None = None, limit: int = 5) -> int:
         if not hasattr(self.approvals, "publish_text"):
             return 0
-        self.logger.info("Building TOP QUALITY-VALUE IDEAS shortlist with limit=%s", limit)
+        self.logger.info("Building TOP RESEARCH IDEAS shortlist with limit=%s", limit)
         candidates = self.list_top_candidates(limit=limit, allow_repeat=True)
         if not candidates:
             if self._stop_requested():
                 self.logger.info("Stop requested. Shortlist generation aborted.")
                 return 0
             try:
-                self.approvals.publish_text("TOP QUALITY-VALUE IDEAS\nNo stocks passed the quality-value screen right now.", chat_id=chat_id)
+                self.approvals.publish_text("TOP RESEARCH IDEAS\nNo companies passed the research screen right now.", chat_id=chat_id)
             except TelegramApiError as exc:
                 self.logger.warning("Telegram publish failed for top tips response: %s", exc)
                 return 0
             return 0
-
-        header = "TOP QUALITY-VALUE IDEAS"
-        if len(candidates) < limit:
-            header = f"{header} ({len(candidates)} of {limit} passed the screen)"
-        lines = [header, ""]
-        for index, (signal, _proposal) in enumerate(candidates, start=1):
-            company_label = self._format_company_label(signal)
-            lines.extend(
-                [
-                    f"{index}. {company_label}",
-                    f"Best horizon: {self._format_horizon(signal)}",
-                    f"Entry price: {self._format_price(getattr(signal, 'entry', None))}",
-                    f"Fair value: {self._format_price(getattr(signal, 'fair_value', None))}",
-                    f"Margin of safety: {self._format_pct(getattr(signal, 'margin_of_safety', None))}",
-                    f"Quality score: {self._format_score(getattr(signal, 'quality_score', None))}",
-                    f"Timing score: {self._format_score(getattr(signal, 'timing_score', None))}",
-                    f"Expected return: {self._format_pct(signal.expected_return)}",
-                    f"Confidence: {signal.confidence:.0%}",
-                    f"Probability up: {self._format_pct(signal.probability_positive)}",
-                    f"Adjusted score/day: {self._format_pct(signal.normalized_score)}",
-                    f"Risks: {self._format_risks(getattr(signal, 'risk_flags', ())) }",
-                    f"Why: {signal.rationale}",
-                    "",
-                ]
-            )
         try:
-            self.approvals.publish_text("\n".join(lines).strip(), chat_id=chat_id)
+            self.approvals.publish_text(render_shortlist(candidates, limit), chat_id=chat_id)
         except TelegramApiError as exc:
             self.logger.warning("Telegram publish failed for top tips response: %s", exc)
             return 0
@@ -242,19 +221,16 @@ class TradingBot:
             report = self.market_data.get_stock_analysis(normalized_symbol, list(self.config.universe.allowed_stocks))
         except MarketDataError as exc:
             raise ConfigError(f"{normalized_symbol} could not be analyzed with the current market data provider.") from exc
-        added = False
-        auto_add_applied = report.recommendation == "BUY"
-        if auto_add_applied:
-            added, normalized_symbol, total = self.add_stock(normalized_symbol)
-        else:
-            total = self.refresh_universe()
+        total = self.refresh_universe()
+        is_watched = normalized_symbol in self.config.universe.allowed_stocks
+        report = replace(
+            report,
+            watchlist_status="Already on watchlist" if is_watched else "Not on watchlist",
+        )
 
         if hasattr(self.approvals, "publish_text"):
             try:
-                self.approvals.publish_text(
-                    self._format_stock_analysis(report, added=added, total=total, auto_add_applied=auto_add_applied),
-                    chat_id=chat_id,
-                )
+                self.approvals.publish_text(render_company_report(report), chat_id=chat_id)
             except TelegramApiError as exc:
                 self.logger.warning("Telegram publish failed for stock analysis %s: %s", normalized_symbol, exc)
                 return 0
@@ -309,7 +285,7 @@ class TradingBot:
                     f"{company_name} ({symbol})",
                     f"Current price: {current_price:.2f}",
                     f"Previous close: {previous_close:.2f}",
-                    f"Daily move: {self._format_pct(move_pct)}",
+                    f"Daily move: {format_pct(move_pct)}",
                     f"Possible reason: {self._portfolio_reason(fundamentals, move_pct)}",
                     "",
                 ]
@@ -332,22 +308,22 @@ class TradingBot:
             "HELP",
             "",
             "/top 5 or top 5",
-            "Get the current TOP QUALITY-VALUE IDEAS shortlist.",
+            "Get the current top research shortlist.",
             "",
-            "/tip",
-            "Get one best current idea.",
+            "/analyze MSFT",
+            "Build a full company research report.",
             "",
-            "/tip MSFT",
-            "Check one specific stock quickly.",
+            "/watch NVDA",
+            "Add a company to your research watchlist.",
             "",
-            "Analise MSFT or /analise MSFT",
-            "Run the detailed stock analysis with valuation models and BUY/HOLD/SELL.",
+            "/tip or /tip MSFT",
+            "Compatibility alias for a quick single-idea screen.",
             "",
             "portfolio or /portfolio",
             "Show the daily performance of the stocks in config/portfolio.txt.",
             "",
-            "add NVDA or /add NVDA",
-            "Add a stock to your watch universe.",
+            "analise MSFT or /analise MSFT",
+            "Compatibility alias for /analyze during the transition.",
             "",
             "help or /help",
             "Show this command list.",
@@ -379,68 +355,6 @@ class TradingBot:
     def _portfolio_path(self) -> Path:
         path = getattr(self.config, "portfolio_path", None)
         return Path(path) if path is not None else Path("config/portfolio.txt")
-
-    def _format_horizon(self, signal: object) -> str:
-        horizon_days = getattr(signal, "horizon_days", None)
-        if horizon_days is not None:
-            if horizon_days == 1:
-                return "1 day"
-            if horizon_days < 21:
-                return f"{horizon_days} days"
-            if horizon_days < 126:
-                return "1 month"
-            return "6 months"
-        return getattr(signal, "timeframe", "n/a")
-
-    def _format_pct(self, value: float | None) -> str:
-        return "n/a" if value is None else f"{value:.1%}"
-
-    def _format_price(self, value: float | None) -> str:
-        return "n/a" if value is None else f"{value:.2f}"
-
-    def _format_score(self, value: float | None) -> str:
-        return "n/a" if value is None else f"{value:.2f}"
-
-    def _format_risks(self, flags: tuple[str, ...] | list[str]) -> str:
-        return "none flagged" if not flags else ", ".join(str(flag) for flag in flags)
-
-    def _format_company_label(self, signal: object) -> str:
-        symbol = getattr(signal, "symbol", "n/a")
-        company_name = getattr(signal, "company_name", None)
-        if company_name:
-            return f"{symbol}: {company_name} ({symbol})"
-        return str(symbol)
-
-    def _format_stock_analysis(self, report: StockAnalysisReport, added: bool, total: int, auto_add_applied: bool) -> str:
-        if auto_add_applied and added:
-            universe_line = f"Universe: added to watchlist ({total} stocks)"
-        elif auto_add_applied:
-            universe_line = f"Universe: already watching ({total} stocks)"
-        else:
-            universe_line = f"Universe: unchanged (auto-add only on BUY, {total} stocks)"
-        options_line = (
-            f"{report.options_sentiment} ({report.options_put_call_ratio:.2f} put/call)"
-            if report.options_put_call_ratio is not None
-            else report.options_sentiment
-        )
-        margin_line = self._format_pct(report.margin_of_safety)
-        return "\n".join(
-            [
-                f"ANALISE {report.symbol}: {(report.company_name or report.symbol)} ({report.symbol})",
-                f"Price: {report.current_price:.2f}",
-                f"FCF model: {self._format_price(report.fcf_value)}",
-                f"DCF model: {self._format_price(report.dcf_value)}",
-                f"Intrinsic value: {self._format_price(report.intrinsic_value)}",
-                f"Analyst target: {self._format_price(report.analyst_target)}",
-                f"Margin of safety: {margin_line}",
-                f"Quality model: {self._format_score(report.quality_score)}",
-                f"Options traders: {options_line}",
-                f"Benchmark: {report.benchmark_summary}",
-                f"Risk: {report.key_risk}",
-                f"Decision: {report.recommendation}",
-                universe_line,
-            ]
-        )
 
     def _portfolio_reason(self, fundamentals: object, move_pct: float | None) -> str:
         if move_pct is None:

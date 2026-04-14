@@ -127,7 +127,9 @@ class TradingBotTests(unittest.TestCase):
 
         self.assertEqual(generated, 1)
         self.assertEqual(len(sent_messages), 1)
-        self.assertIn("Ticker: MSFT", sent_messages[0])
+        self.assertIn("Research idea", sent_messages[0])
+        self.assertIn("Microsoft Corporation (MSFT)", sent_messages[0])
+        self.assertNotIn("Entry Price:", sent_messages[0])
 
     def test_send_top_tips_publishes_ranked_summary(self) -> None:
         sent_messages: list[str] = []
@@ -137,11 +139,13 @@ class TradingBotTests(unittest.TestCase):
 
         self.assertGreaterEqual(generated, 1)
         self.assertEqual(len(sent_messages), 1)
-        self.assertIn("TOP QUALITY-VALUE IDEAS", sent_messages[0])
+        self.assertIn("TOP RESEARCH IDEAS", sent_messages[0])
         self.assertIn("1.", sent_messages[0])
         self.assertIn("Microsoft Corporation (MSFT)", sent_messages[0])
         self.assertIn("Margin of safety:", sent_messages[0])
         self.assertIn("Quality score:", sent_messages[0])
+        self.assertIn("Why now:", sent_messages[0])
+        self.assertIn("Main risk:", sent_messages[0])
 
     def test_send_top_tips_explains_when_fewer_candidates_pass_than_requested(self) -> None:
         sent_messages: list[str] = []
@@ -151,7 +155,7 @@ class TradingBotTests(unittest.TestCase):
 
         self.assertGreaterEqual(generated, 1)
         self.assertEqual(len(sent_messages), 1)
-        self.assertIn("TOP QUALITY-VALUE IDEAS (", sent_messages[0])
+        self.assertIn("TOP RESEARCH IDEAS (", sent_messages[0])
 
     def test_list_top_candidates_ranks_by_margin_of_safety_first(self) -> None:
         ranked = self.bot.list_top_candidates(limit=2, allow_repeat=True)
@@ -202,9 +206,9 @@ class TradingBotTests(unittest.TestCase):
 
         self.assertEqual(generated, 0)
         self.assertEqual(len(sent_messages), 1)
-        self.assertIn("No stocks passed the quality-value screen", sent_messages[0])
+        self.assertIn("No companies passed the research screen", sent_messages[0])
 
-    def test_analyze_stock_publishes_compact_report_and_adds_symbol(self) -> None:
+    def test_analyze_stock_publishes_research_report_without_auto_adding_symbol(self) -> None:
         sent_messages: list[str] = []
         self.bot.approvals.http_post = lambda url, payload: sent_messages.append(payload["text"])
         original = self.bot.market_data.get_stock_analysis
@@ -218,13 +222,13 @@ class TradingBotTests(unittest.TestCase):
 
         self.assertEqual(generated, 1)
         self.assertEqual(len(sent_messages), 1)
-        self.assertIn("ANALISE NVDA", sent_messages[0])
+        self.assertIn("RESEARCH REPORT:", sent_messages[0])
         self.assertIn("NVDA Holdings (NVDA)", sent_messages[0])
-        self.assertIn("FCF model:", sent_messages[0])
-        self.assertIn("DCF model:", sent_messages[0])
         self.assertIn("Intrinsic value:", sent_messages[0])
-        self.assertIn("Decision:", sent_messages[0])
-        self.assertIn("NVDA", self.bot.config.universe.allowed_stocks)
+        self.assertIn("Stance: BUY", sent_messages[0])
+        self.assertIn("Thesis:", sent_messages[0])
+        self.assertIn("Suggested action:", sent_messages[0])
+        self.assertNotIn("NVDA", self.bot.config.universe.allowed_stocks)
 
     def test_analyze_stock_keeps_universe_unchanged_when_not_buy(self) -> None:
         sent_messages: list[str] = []
@@ -240,7 +244,16 @@ class TradingBotTests(unittest.TestCase):
 
         self.assertEqual(generated, 1)
         self.assertNotIn("NVDA", self.bot.config.universe.allowed_stocks)
-        self.assertIn("Universe: unchanged", sent_messages[0])
+        self.assertIn("Watchlist status: Not on watchlist", sent_messages[0])
+        self.assertIn("Suggested action:", sent_messages[0])
+
+    def test_watch_stock_updates_runtime_universe_without_restart(self) -> None:
+        added, symbol, total = self.bot.watch_stock("NVDA")
+
+        self.assertTrue(added)
+        self.assertEqual(symbol, "NVDA")
+        self.assertEqual(total, 3)
+        self.assertIn("NVDA", self.bot.config.universe.allowed_stocks)
 
     def test_add_stock_updates_runtime_universe_without_restart(self) -> None:
         added, symbol, total = self.bot.add_stock("NVDA")
@@ -289,6 +302,8 @@ class TradingBotTests(unittest.TestCase):
         self.assertEqual(len(sent_messages), 1)
         self.assertIn("HELP", sent_messages[0])
         self.assertIn("/top 5 or top 5", sent_messages[0])
+        self.assertIn("/analyze MSFT", sent_messages[0])
+        self.assertIn("/watch NVDA", sent_messages[0])
         self.assertIn("portfolio or /portfolio", sent_messages[0])
         self.assertIn("help or /help", sent_messages[0])
 

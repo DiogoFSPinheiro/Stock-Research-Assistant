@@ -47,6 +47,9 @@ class StockAnalysisReportTests(unittest.TestCase):
         self.assertEqual(report.company_name, "MSFT")
         self.assertGreater(report.intrinsic_value or 0.0, report.current_price)
         self.assertIn("Cheaper than", report.benchmark_summary)
+        self.assertTrue(report.thesis)
+        self.assertGreaterEqual(len(report.catalysts), 1)
+        self.assertEqual(report.watchlist_action, "Add to watchlist now")
 
     def test_builds_sell_report_for_overvalued_stock(self) -> None:
         report = build_stock_analysis_report(
@@ -65,6 +68,8 @@ class StockAnalysisReportTests(unittest.TestCase):
         )
 
         self.assertEqual(report.recommendation, "SELL")
+        self.assertIn("expensive", report.thesis.lower())
+        self.assertEqual(report.watchlist_action, "Do not add to watchlist")
 
 
 if __name__ == "__main__":

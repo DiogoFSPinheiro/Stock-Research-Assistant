@@ -115,11 +115,11 @@ class TelegramApprovalService:
                 except ValueError:
                     limit = None
             return TelegramCommand(update_id=update.update_id, kind="top_tips", chat_id=update.chat_id, actor=update.actor, text=update.text, limit=limit)
-        if first in {"/add", "add"}:
+        if first in {"/watch", "watch", "/add", "add"}:
             if len(parts) >= 2:
                 return TelegramCommand(
                     update_id=update.update_id,
-                    kind="add_stock",
+                    kind="watch_stock",
                     chat_id=update.chat_id,
                     actor=update.actor,
                     text=update.text,
@@ -178,31 +178,22 @@ class TelegramApprovalService:
         target_chat_id = self._resolve_chat_id(chat_id)
         if not self.config.bot_token or not target_chat_id:
             return
-        expected_return = "n/a" if signal.expected_return is None else f"{signal.expected_return:.1%}"
-        uncertainty = "n/a" if signal.uncertainty is None else f"{signal.uncertainty:.1%}"
-        probability_up = "n/a" if signal.probability_positive is None else f"{signal.probability_positive:.0%}"
-        adjusted_score = "n/a" if signal.normalized_score is None else f"{signal.normalized_score:.2%}"
         best_horizon = "n/a" if signal.horizon_days is None else _format_horizon(signal.horizon_days)
         fair_value = "n/a" if signal.fair_value is None else f"{signal.fair_value:.2f}"
         margin = "n/a" if signal.margin_of_safety is None else f"{signal.margin_of_safety:.1%}"
         quality = "n/a" if signal.quality_score is None else f"{signal.quality_score:.2f}"
         timing = "n/a" if signal.timing_score is None else f"{signal.timing_score:.2f}"
         risks = ", ".join(signal.risk_flags) if signal.risk_flags else "none flagged"
+        company_label = signal.company_name or signal.symbol
         text = (
-            f"Quality-Value Stock Pick\n"
-            f"Ticker: {signal.symbol}\n"
+            f"Research idea\n"
+            f"Company: {company_label} ({signal.symbol})\n"
             f"Best Horizon: {best_horizon}\n"
-            f"Model Window: {signal.timeframe}\n"
-            f"Entry Price: {proposal.entry:.4f}\n"
-            f"Exit Price: {proposal.take_profit:.4f}\n"
+            f"Research Window: {signal.timeframe}\n"
             f"Estimated Fair Value: {fair_value}\n"
             f"Margin of Safety: {margin}\n"
             f"Quality Score: {quality}\n"
             f"Timing Score: {timing}\n"
-            f"Expected Return: {expected_return}\n"
-            f"Uncertainty: {uncertainty}\n"
-            f"Probability Up: {probability_up}\n"
-            f"Adjusted Score/Day: {adjusted_score}\n"
             f"Confidence: {signal.confidence:.0%}\n"
             f"Risk Flags: {risks}\n"
             f"Why: {signal.rationale}"
