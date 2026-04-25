@@ -58,7 +58,7 @@ def configure_logging(level: str) -> Logger:
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
     logging.getLogger("yfinance").setLevel(logging.CRITICAL)
-    return logging.getLogger("xtb_trading_bot")
+    return logging.getLogger("stock_research_assistant")
 
 
 def build_application(config: AppConfig | None = None) -> TradingBot:

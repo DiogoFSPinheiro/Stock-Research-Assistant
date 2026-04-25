@@ -1,4 +1,4 @@
-"""XTB trading bot package."""
+"""Stock Research Assistant package."""
 
 from .app import build_application
 

@@ -3,9 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 import unittest
 
-from xtb_trading_bot.config import UniverseConfig
-from xtb_trading_bot.domain import AssetClass, Instrument
-from xtb_trading_bot.instruments import InstrumentFilter
+from stock_research_assistant.config import UniverseConfig
+from stock_research_assistant.domain import AssetClass, Instrument
+from stock_research_assistant.instruments import InstrumentFilter
 
 
 class InstrumentFilterTests(unittest.TestCase):

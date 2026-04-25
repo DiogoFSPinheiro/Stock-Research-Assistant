@@ -22,7 +22,7 @@ TickerFactory = Callable[[str], Any]
 
 
 def _default_get_json(url: str, timeout: int) -> dict:
-    req = request.Request(url, headers={"User-Agent": "xtb-trading-bot/0.1"})
+    req = request.Request(url, headers={"User-Agent": "stock-research-assistant/0.1"})
     with request.urlopen(req, timeout=timeout) as response:
         return json.loads(response.read().decode("utf-8"))
 
@@ -137,7 +137,7 @@ class SyntheticMarketDataProvider:
         instruments.extend(
             [
                 Instrument("OIL_FUT", AssetClass.FUTURE, "GLOBAL", False),
-                Instrument("XTB_SWAP", AssetClass.SWAP, "GLOBAL", False),
+                Instrument("LEGACY_SWAP", AssetClass.SWAP, "GLOBAL", False),
             ]
         )
         return instruments

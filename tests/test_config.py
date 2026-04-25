@@ -4,7 +4,7 @@ from pathlib import Path
 import os
 import unittest
 
-from xtb_trading_bot.config import (
+from stock_research_assistant.config import (
     AppConfig,
     ConfigError,
     MarketDataConfig,

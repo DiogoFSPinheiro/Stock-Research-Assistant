@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "xtb-trading-bot"
+name = "stock-research-assistant"
 version = "0.1.0"
 description = "Research-first Telegram assistant for company analysis and undervalued stock discovery."
 readme = "README.md"
@@ -14,8 +14,7 @@ dependencies = [
 ]
 
 [project.scripts]
-xtb-trading-bot = "xtb_trading_bot.app:main"
-stock-research-assistant = "xtb_trading_bot.app:main"
+stock-research-assistant = "stock_research_assistant.app:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

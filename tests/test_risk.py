@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import unittest
 
-from xtb_trading_bot.config import RiskConfig
-from xtb_trading_bot.domain import AssetClass, PerformanceSnapshot, PositionSnapshot, Signal, SignalSide
-from xtb_trading_bot.risk import RiskEngine, RiskError
+from stock_research_assistant.config import RiskConfig
+from stock_research_assistant.domain import AssetClass, PerformanceSnapshot, PositionSnapshot, Signal, SignalSide
+from stock_research_assistant.risk import RiskEngine, RiskError
 
 
 class RiskEngineTests(unittest.TestCase):

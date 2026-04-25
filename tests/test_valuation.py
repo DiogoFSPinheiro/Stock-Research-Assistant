@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import unittest
 
-from xtb_trading_bot.domain import StockFundamentals
-from xtb_trading_bot.valuation import compute_fair_value
+from stock_research_assistant.domain import StockFundamentals
+from stock_research_assistant.valuation import compute_fair_value
 
 
 def fundamentals(**overrides: object) -> StockFundamentals:

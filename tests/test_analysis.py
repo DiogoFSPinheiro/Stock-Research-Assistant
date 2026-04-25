@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import unittest
 
-from xtb_trading_bot.analysis import build_stock_analysis_report
-from xtb_trading_bot.domain import StockFundamentals
+from stock_research_assistant.analysis import build_stock_analysis_report
+from stock_research_assistant.domain import StockFundamentals
 
 
 def fundamentals(symbol: str = "MSFT", **overrides: object) -> StockFundamentals:

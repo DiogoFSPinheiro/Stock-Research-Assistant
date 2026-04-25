@@ -8,11 +8,11 @@ from datetime import timezone
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-PACKAGE_DIR = ROOT / "src" / "xtb_trading_bot"
+PACKAGE_DIR = ROOT / "src" / "stock_research_assistant"
 
-package = types.ModuleType("xtb_trading_bot")
+package = types.ModuleType("stock_research_assistant")
 package.__path__ = [str(PACKAGE_DIR)]
-sys.modules.setdefault("xtb_trading_bot", package)
+sys.modules.setdefault("stock_research_assistant", package)
 
 
 def _load_module(name: str):
@@ -25,9 +25,9 @@ def _load_module(name: str):
     return module
 
 
-config_module = _load_module("xtb_trading_bot.config")
-domain_module = _load_module("xtb_trading_bot.domain")
-telegram_module = _load_module("xtb_trading_bot.telegram_service")
+config_module = _load_module("stock_research_assistant.config")
+domain_module = _load_module("stock_research_assistant.domain")
+telegram_module = _load_module("stock_research_assistant.telegram_service")
 
 TelegramConfig = config_module.TelegramConfig
 AssetClass = domain_module.AssetClass

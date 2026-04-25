@@ -6,15 +6,15 @@ import unittest
 import uuid
 from dataclasses import replace
 
-from xtb_trading_bot.config import AppConfig, ConfigError, MarketDataConfig, RiskConfig, TelegramConfig, UniverseConfig
-from xtb_trading_bot.domain import StockAnalysisReport, StockFundamentals
-from xtb_trading_bot.instruments import InstrumentFilter
-from xtb_trading_bot.market_data import MarketDataError, SyntheticMarketDataProvider
-from xtb_trading_bot.orchestrator import TradingBot
-from xtb_trading_bot.risk import RiskEngine
-from xtb_trading_bot.storage import JsonStateStore
-from xtb_trading_bot.strategy import UndervaluedStockEngine
-from xtb_trading_bot.telegram_service import TelegramApprovalService
+from stock_research_assistant.config import AppConfig, ConfigError, MarketDataConfig, RiskConfig, TelegramConfig, UniverseConfig
+from stock_research_assistant.domain import StockAnalysisReport, StockFundamentals
+from stock_research_assistant.instruments import InstrumentFilter
+from stock_research_assistant.market_data import MarketDataError, SyntheticMarketDataProvider
+from stock_research_assistant.orchestrator import TradingBot
+from stock_research_assistant.risk import RiskEngine
+from stock_research_assistant.storage import JsonStateStore
+from stock_research_assistant.strategy import UndervaluedStockEngine
+from stock_research_assistant.telegram_service import TelegramApprovalService
 
 
 class RichSyntheticMarketDataProvider(SyntheticMarketDataProvider):

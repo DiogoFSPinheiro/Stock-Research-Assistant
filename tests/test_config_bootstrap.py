@@ -13,9 +13,9 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from xtb_trading_bot.app import build_application
-from xtb_trading_bot.config import AppConfig
-from xtb_trading_bot.market_data import SyntheticMarketDataProvider
+from stock_research_assistant.app import build_application
+from stock_research_assistant.config import AppConfig
+from stock_research_assistant.market_data import SyntheticMarketDataProvider
 
 
 def _parse_env_file(path: Path) -> dict[str, str]:
@@ -95,7 +95,7 @@ class ConfigBootstrapTests(unittest.TestCase):
             MARKET_DATA_PROVIDER="synthetic",
             TELEGRAM_BOT_TOKEN="dummy-token",
             TELEGRAM_CHAT_ID="123456789",
-        ), patch("xtb_trading_bot.app.TelegramApprovalService", FakeApprovalService):
+        ), patch("stock_research_assistant.app.TelegramApprovalService", FakeApprovalService):
             bot = build_application()
 
         self.assertIsInstance(bot.market_data, SyntheticMarketDataProvider)

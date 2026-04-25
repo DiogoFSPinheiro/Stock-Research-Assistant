@@ -4,9 +4,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 import unittest
 
-from xtb_trading_bot.config import MarketDataConfig, UniverseConfig
-from xtb_trading_bot.domain import AssetClass
-from xtb_trading_bot.market_data import MarketDataError, SyntheticMarketDataProvider, YFinanceMarketDataProvider
+from stock_research_assistant.config import MarketDataConfig, UniverseConfig
+from stock_research_assistant.domain import AssetClass
+from stock_research_assistant.market_data import MarketDataError, SyntheticMarketDataProvider, YFinanceMarketDataProvider
 
 
 class MarketDataProviderTests(unittest.TestCase):

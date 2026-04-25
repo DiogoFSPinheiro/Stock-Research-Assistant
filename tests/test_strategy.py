@@ -4,9 +4,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import unittest
 
-from xtb_trading_bot.domain import AssetClass, Candle, ContextSnapshot, Instrument, SignalSide, StockFundamentals
-from xtb_trading_bot.storage import JsonStateStore
-from xtb_trading_bot.strategy import UndervaluedStockEngine
+from stock_research_assistant.domain import AssetClass, Candle, ContextSnapshot, Instrument, SignalSide, StockFundamentals
+from stock_research_assistant.storage import JsonStateStore
+from stock_research_assistant.strategy import UndervaluedStockEngine
 
 
 def build_candles(start: float, step: float, count: int) -> list[Candle]:

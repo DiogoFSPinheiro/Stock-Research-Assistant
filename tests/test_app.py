@@ -5,7 +5,7 @@ from datetime import datetime
 import unittest
 from unittest.mock import patch
 
-from xtb_trading_bot.app import (
+from stock_research_assistant.app import (
     TerminalStopController,
     log_received_command,
     notify_bot_stopping,

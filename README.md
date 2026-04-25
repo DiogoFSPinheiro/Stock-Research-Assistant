@@ -10,7 +10,7 @@ A research-first Telegram assistant for screening companies, estimating fair val
 
 ## Overview
 
-This project began as a trading bot and has since been refocused into a company-analysis workflow. The current product is designed to help identify attractive equity ideas, generate concise research reports, and maintain a watchlist and portfolio view through Telegram.
+This project began as a market-ideas bot and has since been refocused into a company-analysis workflow. The current product is designed to help identify attractive equity ideas, generate concise research reports, and maintain a watchlist and portfolio view through Telegram.
 
 The runtime no longer centers on broker execution. Its primary purpose is equity research, valuation support, and idea prioritization.
 
@@ -90,7 +90,7 @@ Each detailed report includes:
 ## Project Structure
 
 ```text
-src/xtb_trading_bot/   Application code
+src/stock_research_assistant/   Application code
 config/                Watchlist and portfolio files
 data/                  Local JSON state
 tests/                 Unit test suite
@@ -136,7 +136,6 @@ Notes:
 - `BOT_PORTFOLIO_PATH` points to owned holdings and is intentionally separate.
 - `MARKET_DATA_PROVIDER=yfinance` is the default live-data path.
 - `BOT_ALLOWED_TIMEFRAMES` and some risk-oriented settings remain for compatibility with the earlier scoring engine.
-- `XTB_*` settings are deprecated legacy placeholders and are not part of the normal runtime flow.
 
 See `.env.example` for a baseline configuration template.
 
@@ -150,16 +149,10 @@ Preferred entrypoint:
 stock-research-assistant
 ```
 
-Compatibility entrypoint:
+Direct virtualenv execution:
 
 ```powershell
-xtb-trading-bot
-```
-
-Direct module execution:
-
-```powershell
-.\.venv\Scripts\python.exe -m xtb_trading_bot
+.\.venv\Scripts\stock-research-assistant.exe
 ```
 
 ### Run the Test Suite
