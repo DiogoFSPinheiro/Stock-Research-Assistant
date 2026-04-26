@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Callable
 
 from .config import AppConfig, ConfigError, append_stock_to_universe, load_portfolio_symbols, refresh_stock_universe
-from .domain import ApprovalStatus, AssetClass, SignalSide
+from .domain import ApprovalStatus, AssetClass, Candle, SignalSide
 from .instruments import InstrumentFilter
 from .interfaces import ApprovalService, MarketDataProvider, StateStore
 from .market_data import MarketDataError
@@ -259,7 +259,7 @@ class TradingBot:
         detail_lines: list[str] = []
         for symbol in symbols:
             try:
-                candles = self.market_data.get_candles(symbol, "D1", 2)
+                candles = self.market_data.get_candles(symbol, "D1", 22)
                 if len(candles) < 2:
                     raise MarketDataError(f"Not enough daily candles for {symbol}.")
                 previous_close = candles[-2].close
@@ -286,7 +286,7 @@ class TradingBot:
                     f"Current price: {current_price:.2f}",
                     f"Previous close: {previous_close:.2f}",
                     f"Daily move: {format_pct(move_pct)}",
-                    f"Possible reason: {self._portfolio_reason(fundamentals, move_pct)}",
+                    f"Possible reason: {self._portfolio_reason(fundamentals, candles, move_pct)}",
                     "",
                 ]
             )
@@ -356,27 +356,104 @@ class TradingBot:
         path = getattr(self.config, "portfolio_path", None)
         return Path(path) if path is not None else Path("config/portfolio.txt")
 
-    def _portfolio_reason(self, fundamentals: object, move_pct: float | None) -> str:
+    def _portfolio_reason(self, fundamentals: object, candles: list[Candle], move_pct: float | None) -> str:
         if move_pct is None:
             return "insufficient price history"
+        current_candle = candles[-1] if candles else None
+        previous_candles = candles[:-1]
+        close_position = self._close_position_in_range(current_candle)
+        volume_ratio = self._volume_ratio(current_candle, previous_candles[-20:])
+        short_trend = self._lookback_move(candles, 5)
+        medium_trend = self._lookback_move(candles, 20)
+        intraday_move = None
+        if current_candle is not None and current_candle.open:
+            intraday_move = (current_candle.close - current_candle.open) / current_candle.open
+
         revenue_growth = getattr(fundamentals, "revenue_growth", None)
         earnings_growth = getattr(fundamentals, "earnings_growth", None)
         debt_to_equity = getattr(fundamentals, "debt_to_equity", None)
+        free_cash_flow_yield = getattr(fundamentals, "free_cash_flow_yield", None)
         margin_of_safety = None
         current_price = getattr(fundamentals, "current_price", None)
         target_mean_price = getattr(fundamentals, "target_mean_price", None)
         if current_price and target_mean_price:
             margin_of_safety = (target_mean_price - current_price) / current_price
-        if move_pct >= 0.03:
+        if move_pct >= 0.01:
+            drivers: list[str] = []
+            if volume_ratio is not None and volume_ratio >= 1.5:
+                drivers.append(f"heavy volume ({volume_ratio:.1f}x recent average) confirms strong buying")
+            elif volume_ratio is not None and volume_ratio >= 1.15:
+                drivers.append(f"above-average volume ({volume_ratio:.1f}x) supports the move")
+            if close_position is not None and close_position >= 0.75:
+                drivers.append("it closed near the day high, a bullish price-action signal")
+            elif intraday_move is not None and intraday_move > 0.01:
+                drivers.append("buyers lifted it from the open through the session")
+            if short_trend is not None and short_trend > 0.02:
+                drivers.append(f"it is extending a positive 5-day trend ({format_pct(short_trend)})")
+            elif short_trend is not None and short_trend < -0.02:
+                drivers.append(f"it may be rebounding after a weak 5-day trend ({format_pct(short_trend)})")
             if revenue_growth is not None and revenue_growth > 0.08:
-                return "strong growth profile likely helped sentiment"
+                drivers.append(f"revenue growth is strong ({format_pct(revenue_growth)})")
+            if earnings_growth is not None and earnings_growth > 0.1:
+                drivers.append(f"earnings growth is strong ({format_pct(earnings_growth)})")
+            if free_cash_flow_yield is not None and free_cash_flow_yield > 0.05:
+                drivers.append(f"free-cash-flow yield is supportive ({format_pct(free_cash_flow_yield)})")
             if margin_of_safety is not None and margin_of_safety > 0.15:
-                return "valuation upside may be attracting buyers"
-            return "positive market sentiment likely supported the move"
-        if move_pct <= -0.03:
+                drivers.append(f"analyst target implies upside ({format_pct(margin_of_safety)})")
+            if not drivers:
+                return "small gain; likely normal buying or broader market sentiment, with no strong company-specific signal in the available data"
+            return self._join_reason(drivers)
+        if move_pct <= -0.01:
+            drivers = []
+            if volume_ratio is not None and volume_ratio >= 1.5:
+                drivers.append(f"heavy volume ({volume_ratio:.1f}x recent average) points to conviction selling")
+            elif volume_ratio is not None and volume_ratio >= 1.15:
+                drivers.append(f"above-average volume ({volume_ratio:.1f}x) makes the drop more meaningful")
+            if close_position is not None and close_position <= 0.25:
+                drivers.append("it closed near the day low, a bearish price-action signal")
+            elif intraday_move is not None and intraday_move < -0.01:
+                drivers.append("it faded from the open through the session")
+            if short_trend is not None and short_trend < -0.02:
+                drivers.append(f"it is extending a weak 5-day trend ({format_pct(short_trend)})")
+            elif short_trend is not None and short_trend > 0.03:
+                drivers.append(f"it may be profit taking after a strong 5-day run ({format_pct(short_trend)})")
+            if medium_trend is not None and medium_trend < -0.05:
+                drivers.append(f"the 20-day trend is also weak ({format_pct(medium_trend)})")
             if debt_to_equity is not None and debt_to_equity > 100:
-                return "higher leverage may be pressuring sentiment"
+                drivers.append(f"leverage is high (debt/equity {debt_to_equity:.0f})")
             if earnings_growth is not None and earnings_growth < 0:
-                return "weaker earnings profile may be weighing on shares"
-            return "profit taking or weaker market sentiment may explain the drop"
-        return "normal day-to-day price movement"
+                drivers.append(f"earnings growth is negative ({format_pct(earnings_growth)})")
+            if margin_of_safety is not None and margin_of_safety < -0.05:
+                drivers.append(f"analyst target implies limited upside ({format_pct(margin_of_safety)})")
+            if not drivers:
+                return "small drop; likely normal selling or broader market sentiment, with no strong company-specific signal in the available data"
+            return self._join_reason(drivers)
+        return "normal day-to-day price movement; the move is too small to infer a clear driver from the available data"
+
+    def _close_position_in_range(self, candle: Candle | None) -> float | None:
+        if candle is None or candle.high <= candle.low:
+            return None
+        return (candle.close - candle.low) / (candle.high - candle.low)
+
+    def _volume_ratio(self, candle: Candle | None, previous_candles: list[Candle]) -> float | None:
+        if candle is None or candle.volume <= 0:
+            return None
+        volumes = [item.volume for item in previous_candles if item.volume > 0]
+        if not volumes:
+            return None
+        average_volume = sum(volumes) / len(volumes)
+        return None if average_volume <= 0 else candle.volume / average_volume
+
+    def _lookback_move(self, candles: list[Candle], sessions: int) -> float | None:
+        if len(candles) <= sessions:
+            return None
+        base_close = candles[-(sessions + 1)].close
+        if not base_close:
+            return None
+        return (candles[-1].close - base_close) / base_close
+
+    def _join_reason(self, drivers: list[str]) -> str:
+        if len(drivers) == 1:
+            return drivers[0]
+        selected = drivers[:3]
+        return "; ".join(selected[:-1]) + f"; and {selected[-1]}"

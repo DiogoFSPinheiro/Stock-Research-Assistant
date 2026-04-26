@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+from datetime import datetime, timedelta, timezone
 import logging
 import unittest
 import uuid
 from dataclasses import replace
 
 from stock_research_assistant.config import AppConfig, ConfigError, MarketDataConfig, RiskConfig, TelegramConfig, UniverseConfig
-from stock_research_assistant.domain import StockAnalysisReport, StockFundamentals
+from stock_research_assistant.domain import Candle, StockAnalysisReport, StockFundamentals
 from stock_research_assistant.instruments import InstrumentFilter
 from stock_research_assistant.market_data import MarketDataError, SyntheticMarketDataProvider
 from stock_research_assistant.orchestrator import TradingBot
@@ -291,6 +292,42 @@ class TradingBotTests(unittest.TestCase):
         self.assertIn("Apple Inc. (AAPL)", sent_messages[0])
         self.assertIn("Daily move:", sent_messages[0])
         self.assertIn("Possible reason:", sent_messages[0])
+
+    def test_portfolio_reason_explains_up_move_with_price_action_and_fundamentals(self) -> None:
+        base_time = datetime(2026, 4, 1, tzinfo=timezone.utc)
+        candles = [
+            Candle(base_time + timedelta(days=index), 100 + index, 101 + index, 99 + index, 100 + index, 1000)
+            for index in range(21)
+        ]
+        candles.append(Candle(base_time + timedelta(days=21), 121, 126, 120, 125, 2400))
+        fundamentals = StockFundamentals(
+            "MSFT", "Microsoft Corporation", 125, 1.8e12, 7.4e9, "Technology", 18, 15, 3.4, 1.1, 0.24, 0.27, 0.22,
+            0.12, 0.15, 40, 1 / 18.0, 0.060, 0.20, 1.1, 150
+        )
+
+        reason = self.bot._portfolio_reason(fundamentals, candles, (125 - 120) / 120)
+
+        self.assertIn("heavy volume", reason)
+        self.assertIn("closed near the day high", reason)
+        self.assertIn("positive 5-day trend", reason)
+
+    def test_portfolio_reason_explains_down_move_with_selling_and_risk(self) -> None:
+        base_time = datetime(2026, 4, 1, tzinfo=timezone.utc)
+        candles = [
+            Candle(base_time + timedelta(days=index), 130 - index, 131 - index, 129 - index, 130 - index, 1000)
+            for index in range(21)
+        ]
+        candles.append(Candle(base_time + timedelta(days=21), 109, 110, 103, 104, 2500))
+        fundamentals = StockFundamentals(
+            "AAPL", "Apple Inc.", 104, 2.5e12, 15.0e9, "Technology", 28, 24, 9.0, 2.4, 0.22, 0.28, 1.4,
+            0.03, -0.04, 140, 1 / 28.0, 0.028, 0.09, 2.8, 95
+        )
+
+        reason = self.bot._portfolio_reason(fundamentals, candles, (104 - 109) / 109)
+
+        self.assertIn("conviction selling", reason)
+        self.assertIn("closed near the day low", reason)
+        self.assertIn("weak 5-day trend", reason)
 
     def test_send_help_publishes_command_list(self) -> None:
         sent_messages: list[str] = []
