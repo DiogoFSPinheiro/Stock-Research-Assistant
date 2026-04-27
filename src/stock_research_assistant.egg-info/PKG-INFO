@@ -1,0 +1,196 @@
+Metadata-Version: 2.4
+Name: stock-research-assistant
+Version: 0.1.0
+Summary: Research-first Telegram assistant for company analysis and undervalued stock discovery.
+Author: Codex
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: yfinance>=0.2.54
+
+# Stock Research Assistant
+
+![Language](https://img.shields.io/badge/language-Python%203.11%2B-blue)
+![Interface](https://img.shields.io/badge/interface-Telegram-26A5E4)
+![Market%20Data](https://img.shields.io/badge/market%20data-yfinance-0aa06e)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-555555)
+![Focus](https://img.shields.io/badge/focus-Equity%20Research-gold)
+
+A research-first Telegram assistant for screening companies, estimating fair value, and surfacing potentially undervalued stocks from a personal watchlist.
+
+## Overview
+
+This project began as a market-ideas bot and has since been refocused into a company-analysis workflow. The current product is designed to help identify attractive equity ideas, generate concise research reports, and maintain a watchlist and portfolio view through Telegram.
+
+The runtime no longer centers on broker execution. Its primary purpose is equity research, valuation support, and idea prioritization.
+
+## Tech Stack
+
+- **Language:** Python 3.11+
+- **Interface:** Telegram bot
+- **Market data:** `yfinance` by default
+- **Persistence:** local JSON state
+- **Packaging:** `setuptools`
+- **Execution model:** local process or Linux service
+
+## Core Capabilities
+
+- Screen a stock watchlist for quality-value opportunities
+- Rank and deliver a shortlist of top research ideas
+- Generate single-company research reports with valuation context
+- Summarize margin of safety, business quality, catalysts, and key risks
+- Maintain a research watchlist separately from an owned portfolio list
+- Support legacy command aliases while transitioning to a research-first command set
+
+## Command Reference
+
+### Primary Commands
+
+- `/top 3`
+  Return a ranked shortlist of current research ideas.
+- `/analyze MSFT`
+  Generate a detailed company research report.
+- `/watch NVDA`
+  Add a symbol to the research watchlist.
+- `/portfolio`
+  Show the current daily move summary for holdings in `config/portfolio.txt`.
+- `/help`
+  Display the available commands.
+
+### Compatibility Aliases
+
+These remain available for backward compatibility:
+
+- `/tip`
+- `/tip MSFT`
+- `analise MSFT`
+- `/analise MSFT`
+- `add NVDA`
+- `/add NVDA`
+
+## Research Output
+
+### Shortlist Output
+
+Each ranked idea highlights:
+
+- company name and ticker
+- estimated fair value
+- margin of safety
+- business quality score
+- why the idea is interesting now
+- primary risk
+
+### Company Research Report
+
+Each detailed report includes:
+
+- current price
+- intrinsic value estimate
+- analyst target
+- margin of safety
+- business quality
+- peer context
+- stance such as `BUY`, `HOLD`, or `SELL`
+- thesis summary
+- catalysts
+- downside / key-risk summary
+- watchlist status and suggested action
+
+## Project Structure
+
+```text
+src/stock_research_assistant/   Application code
+config/                Watchlist and portfolio files
+data/                  Local JSON state
+tests/                 Unit test suite
+```
+
+## Installation
+
+### Windows (PowerShell)
+
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -e .
+```
+
+### Linux
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e .
+```
+
+## Configuration
+
+Create a `.env` file in the repository root and populate the required Telegram values.
+
+Important settings:
+
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_CHAT_ID`
+- `BOT_STOCK_UNIVERSE_PATH`
+- `BOT_PORTFOLIO_PATH`
+- `MARKET_DATA_PROVIDER`
+- `BOT_AUTO_SCAN_HOUR`
+- `BOT_AUTO_SCAN_MINUTE`
+
+Notes:
+
+- `BOT_STOCK_UNIVERSE_PATH` points to the research watchlist file.
+- `BOT_PORTFOLIO_PATH` points to owned holdings and is intentionally separate.
+- `MARKET_DATA_PROVIDER=yfinance` is the default live-data path.
+- `BOT_ALLOWED_TIMEFRAMES` and some risk-oriented settings remain for compatibility with the earlier scoring engine.
+
+See `.env.example` for a baseline configuration template.
+
+## Running the Assistant
+
+### Start the Application
+
+Preferred entrypoint:
+
+```powershell
+stock-research-assistant
+```
+
+Direct virtualenv execution:
+
+```powershell
+.\.venv\Scripts\stock-research-assistant.exe
+```
+
+### Run the Test Suite
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+## Deployment Notes
+
+The assistant can be hosted on a Linux server or cloud VM such as a DigitalOcean Droplet.
+
+Typical production setup:
+
+1. Clone the repository.
+2. Create a virtual environment.
+3. Install the package with `pip install -e .`.
+4. Add the production `.env`.
+5. Run the assistant under `systemd` for automatic restart and startup on boot.
+
+The application does not require an inbound web port for normal operation. It primarily needs outbound internet access for Telegram and market data.
+
+## Scope and Positioning
+
+This repository is best understood as a personal equity-research assistant rather than an execution bot. It is optimized for:
+
+- screening for undervaluation
+- generating compact research views
+- keeping a working watchlist
+- reviewing owned positions at a glance
+
+It is not intended to be a fully automated brokerage execution system in its current form.

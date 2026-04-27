@@ -1,0 +1,2 @@
+[console_scripts]
+stock-research-assistant = stock_research_assistant.app:main

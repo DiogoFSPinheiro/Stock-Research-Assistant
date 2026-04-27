@@ -50,6 +50,12 @@ class StockAnalysisReportTests(unittest.TestCase):
         self.assertTrue(report.thesis)
         self.assertGreaterEqual(len(report.catalysts), 1)
         self.assertEqual(report.watchlist_action, "Add to watchlist now")
+        self.assertIsNotNone(report.valuation_low)
+        self.assertIsNotNone(report.valuation_high)
+        self.assertIsNotNone(report.quality_adjusted_value)
+        self.assertGreater(report.data_quality_score, 0.5)
+        self.assertGreaterEqual(len(report.model_breakdown), 3)
+        self.assertGreater(report.valuation_confidence, 0.0)
 
     def test_builds_sell_report_for_overvalued_stock(self) -> None:
         report = build_stock_analysis_report(
@@ -70,6 +76,25 @@ class StockAnalysisReportTests(unittest.TestCase):
         self.assertEqual(report.recommendation, "SELL")
         self.assertIn("expensive", report.thesis.lower())
         self.assertEqual(report.watchlist_action, "Do not add to watchlist")
+        self.assertLess(report.margin_of_safety or 0.0, -0.10)
+
+    def test_analyst_target_has_limited_weight_in_intrinsic_value(self) -> None:
+        report = build_stock_analysis_report(
+            "HYPE",
+            fundamentals(
+                symbol="HYPE",
+                free_cash_flow_yield=0.025,
+                earnings_yield=0.030,
+                revenue_growth=0.02,
+                earnings_growth=0.01,
+                target_mean_price=220.0,
+            ),
+            [],
+            put_call_ratio=None,
+        )
+
+        self.assertLess(report.intrinsic_value or 0.0, 160.0)
+        self.assertIn("Analyst target", " ".join(report.model_breakdown))
 
 
 if __name__ == "__main__":

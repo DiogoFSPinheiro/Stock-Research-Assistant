@@ -150,6 +150,12 @@ class StockFundamentals:
     fcf_margin: float | None
     net_debt_to_ebit: float | None
     target_mean_price: float | None
+    free_cash_flow: float | None = None
+    total_revenue: float | None = None
+    enterprise_value: float | None = None
+    total_debt: float | None = None
+    total_cash: float | None = None
+    ebitda: float | None = None
 
 
 @dataclass(frozen=True)
@@ -174,6 +180,15 @@ class StockAnalysisReport:
     what_could_go_wrong: str = "Key risks are not available."
     watchlist_status: str = "Not on watchlist"
     watchlist_action: str = "Review before adding"
+    valuation_low: float | None = None
+    valuation_base: float | None = None
+    valuation_high: float | None = None
+    quality_adjusted_value: float | None = None
+    data_quality_score: float = 0.0
+    data_quality_summary: str = "Data quality was not assessed."
+    model_breakdown: tuple[str, ...] = ()
+    investment_score: float = 0.0
+    valuation_confidence: float = 0.0
 
 
 CompanyResearchReport = StockAnalysisReport

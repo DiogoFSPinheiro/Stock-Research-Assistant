@@ -267,6 +267,8 @@ class MarketDataProviderTests(unittest.TestCase):
         self.assertAlmostEqual(data.free_cash_flow_yield or 0.0, 60_000_000 / 900_000_000)
         self.assertAlmostEqual(data.fcf_margin or 0.0, 60_000_000 / 300_000_000)
         self.assertAlmostEqual(data.net_debt_to_ebit or 0.0, 1.5)
+        self.assertEqual(data.free_cash_flow, 60_000_000.0)
+        self.assertEqual(data.enterprise_value, 900_000_000.0)
 
     def test_synthetic_provider_can_build_stock_analysis(self) -> None:
         provider = SyntheticMarketDataProvider(self.universe)

@@ -220,6 +220,12 @@ class SyntheticMarketDataProvider:
             fcf_margin=0.16,
             net_debt_to_ebit=1.1,
             target_mean_price=current_price * 1.18,
+            free_cash_flow=11_000_000_000,
+            total_revenue=68_750_000_000,
+            enterprise_value=200_000_000_000,
+            total_debt=18_000_000_000,
+            total_cash=6_000_000_000,
+            ebitda=10_900_000_000,
         )
 
     def get_stock_analysis(self, symbol: str, peer_symbols: list[str]) -> CompanyResearchReport:
@@ -448,6 +454,12 @@ class YFinanceMarketDataProvider:
             fcf_margin=self._compute_fcf_margin(info),
             net_debt_to_ebit=self._compute_net_debt_to_ebit(info),
             target_mean_price=_optional_float(info.get("targetMeanPrice")),
+            free_cash_flow=_optional_float(info.get("freeCashflow")),
+            total_revenue=_optional_float(info.get("totalRevenue")),
+            enterprise_value=_optional_float(info.get("enterpriseValue")),
+            total_debt=_optional_float(info.get("totalDebt")),
+            total_cash=_optional_float(info.get("totalCash")),
+            ebitda=_optional_float(info.get("ebitda")),
         )
         self.fundamentals_cache[symbol] = (time.monotonic(), fundamentals)
         return fundamentals

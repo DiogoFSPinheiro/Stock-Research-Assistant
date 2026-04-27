@@ -93,6 +93,7 @@ def render_shortlist(candidates: list[tuple[object, object]], requested_limit: i
 def render_company_report(report: CompanyResearchReport) -> str:
     company_label = format_display_company(report.symbol, report.company_name)
     catalysts = "; ".join(report.catalysts) if report.catalysts else "No clear catalysts available."
+    model_lines = list(report.model_breakdown) if report.model_breakdown else ["No valuation model breakdown available."]
     return "\n".join(
         [
             f"📊 <b>{html_escape(company_label)}</b>",
@@ -104,13 +105,20 @@ def render_company_report(report: CompanyResearchReport) -> str:
             "💵 <b>Valuation</b>",
             f"Current price: {html_escape(format_price(report.current_price))}",
             f"Intrinsic value: {html_escape(format_price(report.intrinsic_value))}",
-            f"Fair value, quality adjusted: {html_escape(format_price(report.fcf_value or report.dcf_value or report.intrinsic_value))}",
+            f"Valuation range: {html_escape(format_price(report.valuation_low))} / {html_escape(format_price(report.valuation_base))} / {html_escape(format_price(report.valuation_high))}",
+            f"Quality-adjusted fair value: {html_escape(format_price(report.quality_adjusted_value))}",
             f"Analyst target: {html_escape(format_price(report.analyst_target))}",
             f"Margin of safety: {html_escape(format_signed_pct(report.margin_of_safety))}",
+            f"Model confidence: {html_escape(format_score(report.valuation_confidence))}",
             "",
             "📈 <b>Business Quality</b>",
             f"Quality score: {html_escape(format_score(report.quality_score))}",
             f"Peer context: {html_escape(report.benchmark_summary)}",
+            f"Data quality: {html_escape(report.data_quality_summary)}",
+            f"Investment score: {html_escape(format_score(report.investment_score))}",
+            "",
+            "Models",
+            *[html_escape(line) for line in model_lines[:5]],
             "",
             "🧠 <b>Thesis</b>",
             html_escape(report.thesis),
