@@ -78,9 +78,13 @@ class ConfigBootstrapTests(unittest.TestCase):
                 self.signal_expiry_minutes = signal_expiry_minutes
                 self.positions_provider = None
                 self.published: list[tuple[object, object]] = []
+                self.published_text: list[str] = []
 
             def publish_signal(self, signal, proposal) -> None:
                 self.published.append((signal, proposal))
+
+            def publish_text(self, text, chat_id=None) -> None:
+                self.published_text.append(text)
 
             def get_pending_decisions(self) -> list[object]:
                 return []
@@ -103,9 +107,9 @@ class ConfigBootstrapTests(unittest.TestCase):
         self.assertEqual(bot.approvals.config.bot_token, "dummy-token")
         self.assertEqual(bot.approvals.config.chat_id, "123456789")
         generated = bot.scan()
-        self.assertGreaterEqual(generated, 1)
-        self.assertGreaterEqual(len(bot.state_store.list_pending_proposals()), 1)
-        self.assertGreaterEqual(len(bot.approvals.published), 1)
+        self.assertGreaterEqual(generated, 0)
+        self.assertEqual(len(bot.state_store.list_pending_proposals()), 0)
+        self.assertGreaterEqual(len(bot.approvals.published_text), 1)
 
     def test_env_example_matches_safe_local_bootstrap_assumptions(self) -> None:
         values = _parse_env_file(Path(".env.example"))

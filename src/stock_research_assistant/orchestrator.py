@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Callable
 
 from .config import AppConfig, ConfigError, append_stock_to_universe, load_portfolio_symbols, refresh_stock_universe
-from .domain import ApprovalStatus, AssetClass, Candle, SignalSide
+from .domain import ApprovalStatus, AssetClass, Candle, CompanyResearchReport, SignalSide
 from .instruments import InstrumentFilter
 from .interfaces import ApprovalService, MarketDataProvider, StateStore
 from .market_data import MarketDataError
@@ -19,6 +19,7 @@ from .reporting import (
     render_company_report,
     render_error,
     render_no_strong_setup,
+    render_quick_research_report,
     render_shortlist,
 )
 from .risk import RiskEngine, RiskError
@@ -131,32 +132,79 @@ class TradingBot:
             getattr(signal, "normalized_score", None) or float("-inf"),
         )
 
+    def _collect_research_reports(
+        self,
+        symbol_filter: Callable[[str], bool] | None = None,
+    ) -> list[CompanyResearchReport]:
+        if self._stop_requested():
+            self.logger.info("Stop requested. Aborting research report collection before start.")
+            return []
+        self.refresh_universe()
+        universe_symbols = list(self.config.universe.allowed_stocks)
+        reports: list[CompanyResearchReport] = []
+        for symbol in universe_symbols:
+            if self._stop_requested():
+                self.logger.info("Stop requested. Aborting research report collection.")
+                return []
+            if symbol_filter is not None and not symbol_filter(symbol):
+                continue
+            try:
+                report = self.market_data.get_stock_analysis(symbol, universe_symbols)
+            except MarketDataError as exc:
+                self.logger.warning("Research data unavailable for %s: %s", symbol, exc)
+                continue
+            reports.append(self._with_watchlist_status(report))
+        return reports
+
+    def _with_watchlist_status(self, report: CompanyResearchReport) -> CompanyResearchReport:
+        is_watched = report.symbol in self.config.universe.allowed_stocks
+        return replace(
+            report,
+            watchlist_status="Already on watchlist" if is_watched else "Not on watchlist",
+        )
+
+    def _passes_research_screen(self, report: CompanyResearchReport) -> bool:
+        if report.recommendation == "SELL":
+            return False
+        if report.intrinsic_value is None or report.margin_of_safety is None:
+            return False
+        if report.data_quality_score < 0.45:
+            return False
+        return report.investment_score >= 0.50 or report.margin_of_safety >= 0.08
+
+    def _research_rank(self, report: CompanyResearchReport) -> tuple[float, float, float, float, float]:
+        return (
+            report.investment_score,
+            report.margin_of_safety if report.margin_of_safety is not None else float("-inf"),
+            report.valuation_confidence,
+            report.data_quality_score,
+            report.quality_score,
+        )
+
     def _select_best_candidate(
         self,
         allow_repeat: bool = False,
         symbol: str | None = None,
-    ) -> tuple[object, object] | None:
+    ) -> CompanyResearchReport | None:
         normalized_symbol = symbol.strip().upper() if symbol else None
-        candidates = self._collect_candidates(
-            allow_repeat=allow_repeat,
-            symbol_filter=(lambda candidate_symbol: candidate_symbol == normalized_symbol) if normalized_symbol else None,
-        )
+        if normalized_symbol:
+            try:
+                report = self.market_data.get_stock_analysis(normalized_symbol, list(self.config.universe.allowed_stocks))
+            except MarketDataError:
+                return None
+            return self._with_watchlist_status(report)
+        candidates = self.list_top_candidates(allow_repeat=allow_repeat)
         if not candidates:
             return None
-        return max(candidates, key=self._candidate_rank)
+        return candidates[0]
 
-    def list_top_candidates(self, limit: int = 5, allow_repeat: bool = True) -> list[tuple[object, object]]:
-        candidates = self._collect_candidates(allow_repeat=allow_repeat)
-        best_by_symbol: dict[str, tuple[object, object]] = {}
-        for candidate in candidates:
-            signal, _proposal = candidate
-            symbol = getattr(signal, "symbol", None)
-            if not symbol:
-                continue
-            current_best = best_by_symbol.get(symbol)
-            if current_best is None or self._candidate_rank(candidate) > self._candidate_rank(current_best):
-                best_by_symbol[symbol] = candidate
-        ranked = sorted(best_by_symbol.values(), key=self._candidate_rank, reverse=True)
+    def list_top_candidates(self, limit: int = 5, allow_repeat: bool = True) -> list[CompanyResearchReport]:
+        reports = [
+            report
+            for report in self._collect_research_reports()
+            if self._passes_research_screen(report)
+        ]
+        ranked = sorted(reports, key=self._research_rank, reverse=True)
         return ranked[:limit]
 
     def send_tip(
@@ -167,8 +215,8 @@ class TradingBot:
         symbol: str | None = None,
     ) -> int:
         self.logger.info("Starting tip request for %s", symbol.upper() if symbol else "best candidate")
-        candidate = self._select_best_candidate(allow_repeat=allow_repeat, symbol=symbol)
-        if candidate is None:
+        report = self._select_best_candidate(allow_repeat=allow_repeat, symbol=symbol)
+        if report is None:
             if self._stop_requested():
                 self.logger.info("Stop requested. Tip request aborted.")
                 return 0
@@ -184,18 +232,15 @@ class TradingBot:
                     self.logger.warning("Telegram publish failed for empty tip response: %s", exc)
             return 0
 
-        signal, proposal = candidate
-        self.state_store.record_proposal(proposal)
+        if not hasattr(self.approvals, "publish_text"):
+            return 0
         try:
-            if chat_id is None:
-                self.approvals.publish_signal(signal, proposal)
-            else:
-                try:
-                    self.approvals.publish_signal(signal, proposal, chat_id=chat_id)
-                except TypeError:
-                    self.approvals.publish_signal(signal, proposal)
+            self.approvals.publish_text(
+                render_quick_research_report(report, best_idea=symbol is None),
+                chat_id=chat_id,
+            )
         except TelegramApiError as exc:
-            self.logger.warning("Telegram publish failed for %s %s: %s", signal.symbol, signal.timeframe, exc)
+            self.logger.warning("Telegram publish failed for quick research %s: %s", report.symbol, exc)
             return 0
         return 1
 

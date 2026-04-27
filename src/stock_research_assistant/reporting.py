@@ -68,26 +68,67 @@ def summarize_idea(signal: Signal) -> list[str]:
     ]
 
 
-def render_shortlist(candidates: list[tuple[object, object]], requested_limit: int) -> str:
-    if not candidates:
+def _data_quality_label(report: CompanyResearchReport) -> str:
+    if report.data_quality_score >= 0.75:
+        return "High"
+    if report.data_quality_score >= 0.55:
+        return "Medium"
+    return "Low"
+
+
+def render_shortlist(reports: list[CompanyResearchReport], requested_limit: int) -> str:
+    if not reports:
         return render_no_strong_setup()
 
     header = "🏆 <b>Top Research Ideas</b>"
-    if len(candidates) < requested_limit:
-        header = f"{header}\n{len(candidates)} of {requested_limit} ideas passed the screen"
+    if len(reports) < requested_limit:
+        header = f"{header}\n{len(reports)} of {requested_limit} ideas passed the screen"
 
     lines = [header, SEPARATOR, ""]
-    for index, (signal, _proposal) in enumerate(candidates, start=1):
-        summary = summarize_idea(signal)
-        lines.append(f"<b>{index}. {html_escape(summary[0])}</b>")
-        lines.append(f"🎯 {html_escape(summary[1])}")
-        lines.append(f"💵 {html_escape(summary[2])}")
-        lines.append(f"🛡️ {html_escape(summary[3])}")
-        lines.append(f"⭐ {html_escape(summary[4])}")
-        lines.append(f"🧠 {html_escape(summary[5])}")
-        lines.append(f"⚠️ {html_escape(summary[6])}")
+    for index, report in enumerate(reports, start=1):
+        lines.append(f"<b>{index}. {html_escape(format_company_label(report.symbol, report.company_name))}</b>")
+        lines.append(f"🎯 Stance: {html_escape(report.recommendation)}")
+        lines.append(f"🧮 Investment score: {html_escape(format_score(report.investment_score))}")
+        lines.append(f"💵 Intrinsic value: {html_escape(format_price(report.intrinsic_value))}")
+        lines.append(f"🛡️ Margin of safety: {html_escape(format_signed_pct(report.margin_of_safety))}")
+        lines.append(f"⭐ Quality score: {html_escape(format_score(report.quality_score))}")
+        lines.append(f"📊 Data quality: {html_escape(_data_quality_label(report))} ({report.data_quality_score:.0%})")
+        lines.append(f"🧠 Why now: {html_escape(report.thesis)}")
+        lines.append(f"⚠️ Main risk: {html_escape(report.key_risk)}")
         lines.append("")
     return "\n".join(lines).strip()
+
+
+def render_quick_research_report(report: CompanyResearchReport, best_idea: bool = False) -> str:
+    company_label = format_display_company(report.symbol, report.company_name)
+    company_name = report.company_name or report.symbol
+    title = "💡 <b>Best Research Idea Right Now</b>" if best_idea else f"💡 <b>Research Idea | {html_escape(company_name)}</b>"
+    model_lines = list(report.model_breakdown)
+    best_model = model_lines[0].split(":", 1)[0] if model_lines else "n/a"
+    weakest_model = model_lines[-1].split(":", 1)[0] if model_lines else "n/a"
+    return "\n".join(
+        [
+            title,
+            SEPARATOR,
+            *(["", html_escape(company_label), ""] if best_idea else [""]),
+            f"Stance: {html_escape(report.recommendation)}",
+            f"Investment score: {html_escape(format_score(report.investment_score))}",
+            f"Current price: {html_escape(format_price(report.current_price))}",
+            f"Intrinsic value: {html_escape(format_price(report.intrinsic_value))}",
+            f"Valuation range: {html_escape(format_price(report.valuation_low))} / {html_escape(format_price(report.valuation_base))} / {html_escape(format_price(report.valuation_high))}",
+            f"Margin of safety: {html_escape(format_signed_pct(report.margin_of_safety))}",
+            "",
+            f"Data quality: {html_escape(_data_quality_label(report))} ({report.data_quality_score:.0%})",
+            f"Model confidence: {html_escape(format_score(report.valuation_confidence))}",
+            f"Best supporting model: {html_escape(best_model)}",
+            f"Weakest model: {html_escape(weakest_model)}",
+            "",
+            f"Thesis: {html_escape(report.thesis)}",
+            f"Main risk: {html_escape(report.key_risk)}",
+            "",
+            f"Suggested action: {html_escape(report.watchlist_action)}",
+        ]
+    )
 
 
 def render_company_report(report: CompanyResearchReport) -> str:
@@ -117,7 +158,7 @@ def render_company_report(report: CompanyResearchReport) -> str:
             f"Data quality: {html_escape(report.data_quality_summary)}",
             f"Investment score: {html_escape(format_score(report.investment_score))}",
             "",
-            "Models",
+            "🧮 Models",
             *[html_escape(line) for line in model_lines[:5]],
             "",
             "🧠 <b>Thesis</b>",

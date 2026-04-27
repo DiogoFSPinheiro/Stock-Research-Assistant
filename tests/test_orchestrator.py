@@ -128,8 +128,8 @@ class TradingBotTests(unittest.TestCase):
 
         self.assertEqual(generated, 1)
         self.assertEqual(len(sent_messages), 1)
-        self.assertIn("💡 <b>Research Idea</b>", sent_messages[0])
-        self.assertIn("MSFT - Microsoft Corporation", sent_messages[0])
+        self.assertIn("💡 <b>Research Idea | Microsoft Corporation</b>", sent_messages[0])
+        self.assertNotIn("MSFT - Microsoft Corporation", sent_messages[0])
         self.assertNotIn("Entry Price:", sent_messages[0])
 
     def test_send_top_tips_publishes_ranked_summary(self) -> None:
@@ -163,12 +163,13 @@ class TradingBotTests(unittest.TestCase):
         ranked = self.bot.list_top_candidates(limit=2, allow_repeat=True)
 
         self.assertGreaterEqual(len(ranked), 1)
-        self.assertEqual(ranked[0][0].symbol, "MSFT")
+        self.assertEqual(ranked[0].symbol, "MSFT")
+        self.assertGreater(ranked[0].investment_score, 0.0)
 
     def test_list_top_candidates_returns_each_symbol_only_once(self) -> None:
         ranked = self.bot.list_top_candidates(limit=5, allow_repeat=True)
 
-        symbols = [signal.symbol for signal, _proposal in ranked]
+        symbols = [report.symbol for report in ranked]
         self.assertEqual(len(symbols), len(set(symbols)))
 
     def test_send_top_tips_reports_empty_when_everything_fails_quality_screen(self) -> None:
