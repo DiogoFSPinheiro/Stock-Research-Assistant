@@ -1,14 +1,27 @@
 from __future__ import annotations
 
+from html import escape
+
 from .domain import CompanyResearchReport, Signal
+
+
+SEPARATOR = "━━━━━━━━━━━━━━━━━━━━"
+
+
+def html_escape(value: object) -> str:
+    return escape(str(value), quote=False)
 
 
 def format_pct(value: float | None) -> str:
     return "n/a" if value is None else f"{value:.1%}"
 
 
+def format_signed_pct(value: float | None) -> str:
+    return "n/a" if value is None else f"{value:+.1%}"
+
+
 def format_price(value: float | None) -> str:
-    return "n/a" if value is None else f"{value:.2f}"
+    return "n/a" if value is None else f"${value:,.2f}"
 
 
 def format_score(value: float | None) -> str:
@@ -18,6 +31,12 @@ def format_score(value: float | None) -> str:
 def format_company_label(symbol: str, company_name: str | None) -> str:
     if company_name:
         return f"{company_name} ({symbol})"
+    return symbol
+
+
+def format_display_company(symbol: str, company_name: str | None) -> str:
+    if company_name:
+        return f"{symbol} - {company_name}"
     return symbol
 
 
@@ -42,7 +61,7 @@ def summarize_idea(signal: Signal) -> list[str]:
         company_label,
         f"Best horizon: {format_horizon(signal)}",
         f"Fair value: {format_price(getattr(signal, 'fair_value', None))}",
-        f"Margin of safety: {format_pct(getattr(signal, 'margin_of_safety', None))}",
+        f"Margin of safety: {format_signed_pct(getattr(signal, 'margin_of_safety', None))}",
         f"Quality score: {format_score(getattr(signal, 'quality_score', None))}",
         f"Why now: {thesis}",
         f"Main risk: {primary_risk}",
@@ -51,38 +70,144 @@ def summarize_idea(signal: Signal) -> list[str]:
 
 def render_shortlist(candidates: list[tuple[object, object]], requested_limit: int) -> str:
     if not candidates:
-        return "TOP RESEARCH IDEAS\nNo companies passed the research screen right now."
+        return render_no_strong_setup()
 
-    header = "TOP RESEARCH IDEAS"
+    header = "🏆 <b>Top Research Ideas</b>"
     if len(candidates) < requested_limit:
-        header = f"{header} ({len(candidates)} of {requested_limit} ideas passed the screen)"
+        header = f"{header}\n{len(candidates)} of {requested_limit} ideas passed the screen"
 
-    lines = [header, ""]
+    lines = [header, SEPARATOR, ""]
     for index, (signal, _proposal) in enumerate(candidates, start=1):
-        lines.append(f"{index}. {summarize_idea(signal)[0]}")
-        lines.extend(summarize_idea(signal)[1:])
+        summary = summarize_idea(signal)
+        lines.append(f"<b>{index}. {html_escape(summary[0])}</b>")
+        lines.append(f"🎯 {html_escape(summary[1])}")
+        lines.append(f"💵 {html_escape(summary[2])}")
+        lines.append(f"🛡️ {html_escape(summary[3])}")
+        lines.append(f"⭐ {html_escape(summary[4])}")
+        lines.append(f"🧠 {html_escape(summary[5])}")
+        lines.append(f"⚠️ {html_escape(summary[6])}")
         lines.append("")
     return "\n".join(lines).strip()
 
 
 def render_company_report(report: CompanyResearchReport) -> str:
-    company_label = format_company_label(report.symbol, report.company_name)
+    company_label = format_display_company(report.symbol, report.company_name)
     catalysts = "; ".join(report.catalysts) if report.catalysts else "No clear catalysts available."
     return "\n".join(
         [
-            f"RESEARCH REPORT: {company_label}",
-            f"Current price: {report.current_price:.2f}",
-            f"Intrinsic value: {format_price(report.intrinsic_value)}",
-            f"Fair value (quality adjusted): {format_price(report.fcf_value or report.dcf_value or report.intrinsic_value)}",
-            f"Analyst target: {format_price(report.analyst_target)}",
-            f"Margin of safety: {format_pct(report.margin_of_safety)}",
-            f"Business quality: {format_score(report.quality_score)}",
-            f"Peer context: {report.benchmark_summary}",
-            f"Stance: {report.recommendation}",
-            f"Thesis: {report.thesis}",
-            f"Catalysts: {catalysts}",
-            f"What could go wrong: {report.what_could_go_wrong}",
-            f"Watchlist status: {report.watchlist_status}",
-            f"Suggested action: {report.watchlist_action}",
+            f"📊 <b>{html_escape(company_label)}</b>",
+            SEPARATOR,
+            "",
+            "🎯 <b>Stance</b>",
+            html_escape(report.recommendation),
+            "",
+            "💵 <b>Valuation</b>",
+            f"Current price: {html_escape(format_price(report.current_price))}",
+            f"Intrinsic value: {html_escape(format_price(report.intrinsic_value))}",
+            f"Fair value, quality adjusted: {html_escape(format_price(report.fcf_value or report.dcf_value or report.intrinsic_value))}",
+            f"Analyst target: {html_escape(format_price(report.analyst_target))}",
+            f"Margin of safety: {html_escape(format_signed_pct(report.margin_of_safety))}",
+            "",
+            "📈 <b>Business Quality</b>",
+            f"Quality score: {html_escape(format_score(report.quality_score))}",
+            f"Peer context: {html_escape(report.benchmark_summary)}",
+            "",
+            "🧠 <b>Thesis</b>",
+            html_escape(report.thesis),
+            "",
+            "🚀 <b>Catalysts</b>",
+            html_escape(catalysts),
+            "",
+            "⚠️ <b>What Could Go Wrong</b>",
+            html_escape(report.what_could_go_wrong),
+            "",
+            "👀 <b>Watchlist</b>",
+            f"Status: {html_escape(report.watchlist_status)}",
+            f"Suggested action: {html_escape(report.watchlist_action)}",
+        ]
+    )
+
+
+def render_no_strong_setup(symbol: str | None = None) -> str:
+    lines = ["🔎 <b>No Strong Setup Found</b>", SEPARATOR, ""]
+    if symbol:
+        lines.extend(
+            [
+                f"No strong setup found for {html_escape(symbol.upper())} right now.",
+                "",
+                "The company may still be worth watching, but the current valuation, timing, or risk profile is not attractive enough.",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "No companies passed the research screen right now.",
+                "",
+                "This usually means valuation, quality, timing, or risk filters are not aligned enough for a high-conviction idea.",
+                "Try again later as prices and fundamentals update.",
+            ]
+        )
+    return "\n".join(lines)
+
+
+def render_watchlist_update(symbol: str, total: int, added: bool) -> str:
+    normalized_symbol = symbol.upper()
+    if added:
+        return "\n".join(
+            [
+                "👀 <b>Watchlist Updated</b>",
+                SEPARATOR,
+                "",
+                f"{html_escape(normalized_symbol)} added to the research universe.",
+                "",
+                f"Total tracked stocks: {total}",
+                "You can now run:",
+                f"/analyze {html_escape(normalized_symbol)}",
+                f"/tip {html_escape(normalized_symbol)}",
+            ]
+        )
+    return "\n".join(
+        [
+            "👀 <b>Watchlist</b>",
+            SEPARATOR,
+            "",
+            f"{html_escape(normalized_symbol)} is already on the research universe.",
+            "",
+            f"Total tracked stocks: {total}",
+        ]
+    )
+
+
+def render_error(title: str, detail: object) -> str:
+    return "\n".join(
+        [
+            f"⚠️ <b>{html_escape(title)}</b>",
+            SEPARATOR,
+            "",
+            html_escape(detail),
+        ]
+    )
+
+
+def render_research_cycle_started() -> str:
+    return "\n".join(
+        [
+            "🔎 <b>Research cycle started</b>",
+            SEPARATOR,
+            "",
+            "Building the current top research ideas.",
+            "Please wait before sending more requests.",
+        ]
+    )
+
+
+def render_portfolio_started() -> str:
+    return "\n".join(
+        [
+            "📁 <b>Portfolio report started</b>",
+            SEPARATOR,
+            "",
+            "Building today's portfolio performance report.",
+            "Please wait before sending more requests.",
         ]
     )

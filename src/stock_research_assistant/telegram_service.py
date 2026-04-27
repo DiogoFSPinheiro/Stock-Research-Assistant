@@ -9,6 +9,15 @@ from urllib import error, parse, request
 
 from .config import TelegramConfig
 from .domain import ApprovalDecision, OrderProposal, PositionSnapshot, Signal
+from .reporting import (
+    SEPARATOR,
+    format_display_company,
+    format_horizon,
+    format_price,
+    format_score,
+    format_signed_pct,
+    html_escape,
+)
 
 
 HttpPost = Callable[[str, dict], None]
@@ -87,7 +96,7 @@ class TelegramApprovalService:
             return
         self.http_post(
             self._bot_api_url("sendMessage"),
-            {"chat_id": chat_id, "text": text},
+            {"chat_id": chat_id, "text": text, "parse_mode": "HTML"},
         )
 
     def _resolve_chat_id(self, chat_id: str | int | None = None) -> str | int | None:
@@ -178,25 +187,38 @@ class TelegramApprovalService:
         target_chat_id = self._resolve_chat_id(chat_id)
         if not self.config.bot_token or not target_chat_id:
             return
-        best_horizon = "n/a" if signal.horizon_days is None else _format_horizon(signal.horizon_days)
-        fair_value = "n/a" if signal.fair_value is None else f"{signal.fair_value:.2f}"
-        margin = "n/a" if signal.margin_of_safety is None else f"{signal.margin_of_safety:.1%}"
-        quality = "n/a" if signal.quality_score is None else f"{signal.quality_score:.2f}"
-        timing = "n/a" if signal.timing_score is None else f"{signal.timing_score:.2f}"
+        best_horizon = format_horizon(signal)
+        fair_value = format_price(signal.fair_value)
+        margin = format_signed_pct(signal.margin_of_safety)
+        quality = format_score(signal.quality_score)
+        timing = format_score(signal.timing_score)
         risks = ", ".join(signal.risk_flags) if signal.risk_flags else "none flagged"
-        company_label = signal.company_name or signal.symbol
-        text = (
-            f"Research idea\n"
-            f"Company: {company_label} ({signal.symbol})\n"
-            f"Best Horizon: {best_horizon}\n"
-            f"Research Window: {signal.timeframe}\n"
-            f"Estimated Fair Value: {fair_value}\n"
-            f"Margin of Safety: {margin}\n"
-            f"Quality Score: {quality}\n"
-            f"Timing Score: {timing}\n"
-            f"Confidence: {signal.confidence:.0%}\n"
-            f"Risk Flags: {risks}\n"
-            f"Why: {signal.rationale}"
+        company_label = format_display_company(signal.symbol, signal.company_name)
+        text = "\n".join(
+            [
+                "💡 <b>Research Idea</b>",
+                f"<b>{html_escape(company_label)}</b>",
+                SEPARATOR,
+                "",
+                "🎯 <b>Setup</b>",
+                f"Best horizon: {html_escape(best_horizon)}",
+                f"Research window: {html_escape(signal.timeframe)}",
+                f"Confidence: {signal.confidence:.0%}",
+                "",
+                "💵 <b>Valuation</b>",
+                f"Estimated fair value: {html_escape(fair_value)}",
+                f"Margin of safety: {html_escape(margin)}",
+                "",
+                "📈 <b>Scores</b>",
+                f"Quality score: {html_escape(quality)}",
+                f"Timing score: {html_escape(timing)}",
+                "",
+                "🧠 <b>Why</b>",
+                html_escape(signal.rationale),
+                "",
+                "⚠️ <b>Risk Flags</b>",
+                html_escape(risks),
+            ]
         )
         self._send_message(target_chat_id, text)
 
@@ -279,12 +301,3 @@ class TelegramApprovalService:
         self.recent_command_signatures[signature] = now
         return previous is not None and (now - previous) <= self.dedupe_window_seconds
 
-
-def _format_horizon(horizon_days: int) -> str:
-    if horizon_days == 1:
-        return "1 day"
-    if horizon_days < 21:
-        return f"{horizon_days} days"
-    if horizon_days < 126:
-        return "1 month"
-    return "6 months"

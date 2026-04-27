@@ -128,8 +128,8 @@ class TradingBotTests(unittest.TestCase):
 
         self.assertEqual(generated, 1)
         self.assertEqual(len(sent_messages), 1)
-        self.assertIn("Research idea", sent_messages[0])
-        self.assertIn("Microsoft Corporation (MSFT)", sent_messages[0])
+        self.assertIn("💡 <b>Research Idea</b>", sent_messages[0])
+        self.assertIn("MSFT - Microsoft Corporation", sent_messages[0])
         self.assertNotIn("Entry Price:", sent_messages[0])
 
     def test_send_top_tips_publishes_ranked_summary(self) -> None:
@@ -140,7 +140,7 @@ class TradingBotTests(unittest.TestCase):
 
         self.assertGreaterEqual(generated, 1)
         self.assertEqual(len(sent_messages), 1)
-        self.assertIn("TOP RESEARCH IDEAS", sent_messages[0])
+        self.assertIn("🏆 <b>Top Research Ideas</b>", sent_messages[0])
         self.assertIn("1.", sent_messages[0])
         self.assertIn("Microsoft Corporation (MSFT)", sent_messages[0])
         self.assertIn("Margin of safety:", sent_messages[0])
@@ -156,7 +156,8 @@ class TradingBotTests(unittest.TestCase):
 
         self.assertGreaterEqual(generated, 1)
         self.assertEqual(len(sent_messages), 1)
-        self.assertIn("TOP RESEARCH IDEAS (", sent_messages[0])
+        self.assertIn("🏆 <b>Top Research Ideas</b>", sent_messages[0])
+        self.assertIn("of 5 ideas passed the screen", sent_messages[0])
 
     def test_list_top_candidates_ranks_by_margin_of_safety_first(self) -> None:
         ranked = self.bot.list_top_candidates(limit=2, allow_repeat=True)
@@ -223,11 +224,10 @@ class TradingBotTests(unittest.TestCase):
 
         self.assertEqual(generated, 1)
         self.assertEqual(len(sent_messages), 1)
-        self.assertIn("RESEARCH REPORT:", sent_messages[0])
-        self.assertIn("NVDA Holdings (NVDA)", sent_messages[0])
+        self.assertIn("📊 <b>NVDA - NVDA Holdings</b>", sent_messages[0])
         self.assertIn("Intrinsic value:", sent_messages[0])
-        self.assertIn("Stance: BUY", sent_messages[0])
-        self.assertIn("Thesis:", sent_messages[0])
+        self.assertIn("🎯 <b>Stance</b>\nBUY", sent_messages[0])
+        self.assertIn("🧠 <b>Thesis</b>", sent_messages[0])
         self.assertIn("Suggested action:", sent_messages[0])
         self.assertNotIn("NVDA", self.bot.config.universe.allowed_stocks)
 
@@ -245,7 +245,7 @@ class TradingBotTests(unittest.TestCase):
 
         self.assertEqual(generated, 1)
         self.assertNotIn("NVDA", self.bot.config.universe.allowed_stocks)
-        self.assertIn("Watchlist status: Not on watchlist", sent_messages[0])
+        self.assertIn("Status: Not on watchlist", sent_messages[0])
         self.assertIn("Suggested action:", sent_messages[0])
 
     def test_watch_stock_updates_runtime_universe_without_restart(self) -> None:
@@ -287,9 +287,9 @@ class TradingBotTests(unittest.TestCase):
 
         self.assertEqual(generated, 2)
         self.assertEqual(len(sent_messages), 1)
-        self.assertIn("PORTFOLIO", sent_messages[0])
-        self.assertIn("Up: 2 , Down: 0 , Neutral: 0", sent_messages[0])
-        self.assertIn("Apple Inc. (AAPL)", sent_messages[0])
+        self.assertIn("📁 <b>Portfolio Daily Report</b>", sent_messages[0])
+        self.assertIn("🟢 Up: 2  | 🔴 Down: 0  | ⚪ Neutral: 0", sent_messages[0])
+        self.assertIn("Apple Inc. - AAPL", sent_messages[0])
         self.assertIn("Daily move:", sent_messages[0])
         self.assertIn("Possible reason:", sent_messages[0])
 
@@ -337,7 +337,7 @@ class TradingBotTests(unittest.TestCase):
 
         self.assertEqual(generated, 1)
         self.assertEqual(len(sent_messages), 1)
-        self.assertIn("HELP", sent_messages[0])
+        self.assertIn("🤖 <b>Stock Research Assistant</b>", sent_messages[0])
         self.assertIn("/top 5 or top 5", sent_messages[0])
         self.assertIn("/analyze MSFT", sent_messages[0])
         self.assertIn("/watch NVDA", sent_messages[0])

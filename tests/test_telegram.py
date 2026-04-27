@@ -91,10 +91,11 @@ class TelegramApprovalServiceTests(unittest.TestCase):
     def test_publish_signal_sends_message(self) -> None:
         self.service.publish_signal(self.signal, self.proposal)
         self.assertEqual(len(self.calls), 1)
-        self.assertIn("Research idea", self.calls[0][1]["text"])
-        self.assertIn("Company: Apple Inc. (AAPL)", self.calls[0][1]["text"])
-        self.assertIn("Best Horizon:", self.calls[0][1]["text"])
-        self.assertIn("Research Window: D1", self.calls[0][1]["text"])
+        self.assertEqual(self.calls[0][1]["parse_mode"], "HTML")
+        self.assertIn("💡 <b>Research Idea</b>", self.calls[0][1]["text"])
+        self.assertIn("<b>AAPL - Apple Inc.</b>", self.calls[0][1]["text"])
+        self.assertIn("Best horizon:", self.calls[0][1]["text"])
+        self.assertIn("Research window: D1", self.calls[0][1]["text"])
         self.assertNotIn("Entry Price:", self.calls[0][1]["text"])
 
     def test_poll_tip_requests_returns_tip_command_without_replying(self) -> None:

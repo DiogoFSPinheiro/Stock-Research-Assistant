@@ -11,6 +11,7 @@ from .config import AppConfig, ConfigError
 from .instruments import InstrumentFilter
 from .market_data import MarketDataError, build_market_data_provider
 from .orchestrator import TradingBot
+from .reporting import render_error, render_portfolio_started, render_research_cycle_started, render_watchlist_update
 from .risk import RiskEngine
 from .storage import JsonStateStore
 from .strategy import UndervaluedStockEngine
@@ -86,7 +87,7 @@ def notify_scheduled_scan_start(bot: TradingBot) -> None:
     bot.logger.info(message)
     if hasattr(bot.approvals, "publish_text"):
         try:
-            bot.approvals.publish_text(message)
+            bot.approvals.publish_text(render_research_cycle_started())
         except TelegramApiError as exc:
             bot.logger.warning("Telegram publish failed for cycle start notice: %s", exc)
 
@@ -100,7 +101,7 @@ def notify_portfolio_report_start(bot: TradingBot) -> None:
     bot.logger.info(message)
     if hasattr(bot.approvals, "publish_text"):
         try:
-            bot.approvals.publish_text(message)
+            bot.approvals.publish_text(render_portfolio_started())
         except TelegramApiError as exc:
             bot.logger.warning("Telegram publish failed for portfolio start notice: %s", exc)
 
@@ -256,16 +257,12 @@ def main() -> int:
                         try:
                             added, symbol, total = bot.watch_stock(getattr(command, "symbol", "") or "")
                             if hasattr(bot.approvals, "publish_text"):
-                                message = (
-                                    f"Added {symbol} to your research watchlist. Total watched stocks: {total}."
-                                    if added
-                                    else f"{symbol} is already on your research watchlist. Total watched stocks: {total}."
-                                )
+                                message = render_watchlist_update(symbol, total, added)
                                 bot.approvals.publish_text(message, chat_id=getattr(command, "chat_id", None))
                         except ConfigError as exc:
                             if hasattr(bot.approvals, "publish_text"):
                                 bot.approvals.publish_text(
-                                    f"Unable to update watchlist: {exc}",
+                                    render_error("Unable to update watchlist", exc),
                                     chat_id=getattr(command, "chat_id", None),
                                 )
                         continue
@@ -278,7 +275,7 @@ def main() -> int:
                         except ConfigError as exc:
                             if hasattr(bot.approvals, "publish_text"):
                                 bot.approvals.publish_text(
-                                    f"Unable to analyze stock: {exc}",
+                                    render_error("Unable to analyze stock", exc),
                                     chat_id=getattr(command, "chat_id", None),
                                 )
                         continue

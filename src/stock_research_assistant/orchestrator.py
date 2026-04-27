@@ -10,7 +10,17 @@ from .domain import ApprovalStatus, AssetClass, Candle, SignalSide
 from .instruments import InstrumentFilter
 from .interfaces import ApprovalService, MarketDataProvider, StateStore
 from .market_data import MarketDataError
-from .reporting import format_pct, render_company_report, render_shortlist
+from .reporting import (
+    SEPARATOR,
+    format_pct,
+    format_price,
+    format_signed_pct,
+    html_escape,
+    render_company_report,
+    render_error,
+    render_no_strong_setup,
+    render_shortlist,
+)
 from .risk import RiskEngine, RiskError
 from .strategy import UndervaluedStockEngine
 from .telegram_service import TelegramApiError
@@ -165,9 +175,9 @@ class TradingBot:
             if notify_when_empty and hasattr(self.approvals, "publish_text"):
                 try:
                     message = (
-                        f"No strong setup found for {symbol.upper()} right now. Try again a bit later."
+                        render_no_strong_setup(symbol)
                         if symbol
-                        else "No strong stock tip right now. Try again a bit later."
+                        else render_no_strong_setup()
                     )
                     self.approvals.publish_text(message, chat_id=chat_id)
                 except TelegramApiError as exc:
@@ -199,7 +209,7 @@ class TradingBot:
                 self.logger.info("Stop requested. Shortlist generation aborted.")
                 return 0
             try:
-                self.approvals.publish_text("TOP RESEARCH IDEAS\nNo companies passed the research screen right now.", chat_id=chat_id)
+                self.approvals.publish_text(render_no_strong_setup(), chat_id=chat_id)
             except TelegramApiError as exc:
                 self.logger.warning("Telegram publish failed for top tips response: %s", exc)
                 return 0
@@ -244,14 +254,14 @@ class TradingBot:
         if not symbols:
             try:
                 self.approvals.publish_text(
-                    "PORTFOLIO\nNo portfolio symbols configured right now.",
+                    render_error("Portfolio Daily Report", "No portfolio symbols configured right now."),
                     chat_id=chat_id,
                 )
             except TelegramApiError as exc:
                 self.logger.warning("Telegram publish failed for portfolio response: %s", exc)
             return 0
 
-        lines = ["PORTFOLIO"]
+        lines = ["📁 <b>Portfolio Daily Report</b>", SEPARATOR, ""]
         generated = 0
         up_count = 0
         down_count = 0
@@ -269,7 +279,14 @@ class TradingBot:
             except MarketDataError as exc:
                 self.logger.warning("Portfolio data unavailable for %s: %s", symbol, exc)
                 neutral_count += 1
-                detail_lines.extend([f"{symbol}", "Daily move: n/a", "Possible reason: market data unavailable", ""])
+                detail_lines.extend(
+                    [
+                        f"<b>{html_escape(symbol)}</b>",
+                        "Daily move: n/a",
+                        "Possible reason: market data unavailable",
+                        "",
+                    ]
+                )
                 continue
             company_name = fundamentals.company_name or symbol
             if move_pct is None:
@@ -282,16 +299,16 @@ class TradingBot:
                 neutral_count += 1
             detail_lines.extend(
                 [
-                    f"{company_name} ({symbol})",
-                    f"Current price: {current_price:.2f}",
-                    f"Previous close: {previous_close:.2f}",
-                    f"Daily move: {format_pct(move_pct)}",
-                    f"Possible reason: {self._portfolio_reason(fundamentals, candles, move_pct)}",
+                    f"<b>{html_escape(company_name)} - {html_escape(symbol)}</b>",
+                    f"Current price: {html_escape(format_price(current_price))}",
+                    f"Previous close: {html_escape(format_price(previous_close))}",
+                    f"Daily move: {html_escape(format_signed_pct(move_pct))}",
+                    f"Possible reason: {html_escape(self._portfolio_reason(fundamentals, candles, move_pct))}",
                     "",
                 ]
             )
             generated += 1
-        lines.extend([f"Up: {up_count} , Down: {down_count} , Neutral: {neutral_count}", ""])
+        lines.extend([f"🟢 Up: {up_count}  | 🔴 Down: {down_count}  | ⚪ Neutral: {neutral_count}", ""])
         lines.extend(detail_lines)
 
         try:
@@ -305,26 +322,32 @@ class TradingBot:
         if not hasattr(self.approvals, "publish_text"):
             return 0
         lines = [
-            "HELP",
+            "🤖 <b>Stock Research Assistant</b>",
+            SEPARATOR,
             "",
+            "<b>Research</b>",
             "/top 5 or top 5",
             "Get the current top research shortlist.",
             "",
             "/analyze MSFT",
             "Build a full company research report.",
             "",
-            "/watch NVDA",
-            "Add a company to your research watchlist.",
-            "",
             "/tip or /tip MSFT",
-            "Compatibility alias for a quick single-idea screen.",
+            "Run a quick single-idea screen.",
             "",
+            "<b>Watchlist</b>",
+            "/watch NVDA",
+            "Add a company to your research universe.",
+            "",
+            "<b>Portfolio</b>",
             "portfolio or /portfolio",
             "Show the daily performance of the stocks in config/portfolio.txt.",
             "",
+            "<b>Aliases</b>",
             "analise MSFT or /analise MSFT",
             "Compatibility alias for /analyze during the transition.",
             "",
+            "<b>Help</b>",
             "help or /help",
             "Show this command list.",
         ]

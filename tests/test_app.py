@@ -61,7 +61,11 @@ class TerminalStopControllerTests(unittest.TestCase):
             messages,
             [
                 "Top research ideas cycle started. Please wait before sending more requests.",
-                "Top research ideas cycle started. Please wait before sending more requests.",
+                "🔎 <b>Research cycle started</b>\n"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                "\n"
+                "Building the current top research ideas.\n"
+                "Please wait before sending more requests.",
             ],
         )
 
@@ -100,7 +104,11 @@ class TerminalStopControllerTests(unittest.TestCase):
             messages,
             [
                 "PORTFOLIO daily report started. Please wait before sending more requests.",
-                "PORTFOLIO daily report started. Please wait before sending more requests.",
+                "📁 <b>Portfolio report started</b>\n"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                "\n"
+                "Building today's portfolio performance report.\n"
+                "Please wait before sending more requests.",
             ],
         )
 
