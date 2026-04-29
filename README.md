@@ -52,13 +52,37 @@ The runtime no longer centers on trade execution. `/top` and `/tip` now publish 
 - `/analyze MSFT`
   English alias for `/analise MSFT`.
 
+- `/compare AAPL MSFT`
+  Compare two to five companies by valuation, margin of safety, business quality, data quality, investment score, and main risk.
+
 ### Watchlist And Portfolio
 
 - `/watch NVDA`
   Add a symbol to the research watchlist file.
 
+- `/watchlist`
+  Show the current research watchlist with stance, score, margin of safety, data quality, and main risk.
+
 - `/portfolio`
   Show the current daily move summary for holdings in `config/portfolio.txt`.
+
+- `/portfolio add MSFT 10 320.50`
+  Add or replace a portfolio holding with symbol, quantity, and average cost.
+
+- `/portfolio update MSFT 12 315.00`
+  Update an existing holding's quantity and average cost.
+
+- `/portfolio remove MSFT`
+  Remove a holding from the portfolio.
+
+- `/alert MSFT 15%`
+  Create or update a research alert that triggers when margin of safety reaches the threshold.
+
+- `/alerts`
+  List active research alerts.
+
+- `/unalert MSFT`
+  Remove an active research alert.
 
 - `/help`
   Display the available commands.
@@ -76,6 +100,8 @@ These remain available:
 - `analyse MSFT`
 - `add NVDA`
 - `/add NVDA`
+- `watchlist`
+- `compare AAPL MSFT`
 
 ## Research Output
 
@@ -177,6 +203,7 @@ Notes:
 - `BOT_STOCK_UNIVERSE_PATH` points to the research watchlist file.
 - `BOT_ALLOWED_STOCKS` is only used as a fallback when the watchlist file is empty or missing.
 - `BOT_PORTFOLIO_PATH` points to owned holdings and is intentionally separate from the research watchlist.
+- Portfolio rows can be either `SYMBOL` or `SYMBOL,quantity,avg_cost`; the richer form enables P/L reporting.
 - `MARKET_DATA_PROVIDER=yfinance` is the default live-data path for research reports.
 - `MARKET_DATA_PROVIDER=synthetic` is useful for local dry runs and tests.
 

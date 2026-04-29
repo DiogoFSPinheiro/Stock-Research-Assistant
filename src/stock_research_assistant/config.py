@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 import os
 
+from .domain import PortfolioHolding
+
 
 def _split_csv(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
@@ -63,7 +65,92 @@ def load_stock_universe(path: str | Path) -> tuple[str, ...]:
 
 
 def load_portfolio_symbols(path: str | Path) -> tuple[str, ...]:
-    return load_stock_universe(path)
+    return tuple(holding.symbol for holding in load_portfolio_holdings(path))
+
+
+def load_portfolio_holdings(path: str | Path) -> tuple[PortfolioHolding, ...]:
+    holdings: list[PortfolioHolding] = []
+    seen: set[str] = set()
+    for raw_line in _load_symbol_file(path):
+        parts = [part.strip() for part in raw_line.split(",")]
+        symbol = normalize_stock_symbol(parts[0]) if parts else ""
+        if not symbol or symbol in seen:
+            continue
+        quantity = _optional_positive_float(parts[1]) if len(parts) >= 2 else None
+        average_cost = _optional_positive_float(parts[2]) if len(parts) >= 3 else None
+        holdings.append(PortfolioHolding(symbol=symbol, quantity=quantity, average_cost=average_cost))
+        seen.add(symbol)
+    return tuple(holdings)
+
+
+def _optional_positive_float(value: str) -> float | None:
+    if not value.strip():
+        return None
+    try:
+        parsed = float(value)
+    except ValueError:
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _format_float(value: float) -> str:
+    formatted = f"{value:.6f}".rstrip("0").rstrip(".")
+    return formatted or "0"
+
+
+def _write_portfolio_holdings(path: str | Path, holdings: tuple[PortfolioHolding, ...]) -> None:
+    file_path = Path(path)
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    lines: list[str] = []
+    for holding in holdings:
+        if holding.quantity is not None and holding.average_cost is not None:
+            lines.append(
+                f"{holding.symbol},{_format_float(holding.quantity)},{_format_float(holding.average_cost)}"
+            )
+        else:
+            lines.append(holding.symbol)
+    file_path.write_text(("\n".join(lines) + "\n") if lines else "", encoding="utf-8")
+
+
+def upsert_portfolio_holding(
+    path: str | Path,
+    symbol: str,
+    quantity: float,
+    average_cost: float,
+) -> tuple[bool, PortfolioHolding, int]:
+    normalized = normalize_stock_symbol(symbol)
+    if not normalized:
+        raise ConfigError("Portfolio symbol cannot be empty.")
+    if quantity <= 0:
+        raise ConfigError("Portfolio quantity must be greater than 0.")
+    if average_cost <= 0:
+        raise ConfigError("Portfolio average cost must be greater than 0.")
+
+    new_holding = PortfolioHolding(normalized, quantity, average_cost)
+    holdings = list(load_portfolio_holdings(path))
+    updated = False
+    added = True
+    for index, holding in enumerate(holdings):
+        if holding.symbol == normalized:
+            holdings[index] = new_holding
+            updated = True
+            added = False
+            break
+    if not updated:
+        holdings.append(new_holding)
+    _write_portfolio_holdings(path, tuple(holdings))
+    return added, new_holding, len(holdings)
+
+
+def remove_portfolio_holding(path: str | Path, symbol: str) -> tuple[bool, str, int]:
+    normalized = normalize_stock_symbol(symbol)
+    if not normalized:
+        raise ConfigError("Portfolio symbol cannot be empty.")
+    holdings = list(load_portfolio_holdings(path))
+    remaining = [holding for holding in holdings if holding.symbol != normalized]
+    removed = len(remaining) != len(holdings)
+    _write_portfolio_holdings(path, tuple(remaining))
+    return removed, normalized, len(remaining)
 
 
 def append_stock_to_universe(path: str | Path, symbol: str) -> tuple[bool, str]:

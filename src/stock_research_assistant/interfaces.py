@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Protocol
 
 from .domain import (
@@ -78,4 +79,16 @@ class StateStore(Protocol):
         ...
 
     def mark_portfolio_report_on(self, day: str) -> None:
+        ...
+
+    def list_alerts(self) -> list[dict]:
+        ...
+
+    def upsert_alert(self, symbol: str, threshold: float) -> tuple[bool, dict]:
+        ...
+
+    def remove_alert(self, symbol: str) -> tuple[bool, str, int]:
+        ...
+
+    def mark_alert_triggered(self, symbol: str, triggered_at: datetime | None = None) -> None:
         ...

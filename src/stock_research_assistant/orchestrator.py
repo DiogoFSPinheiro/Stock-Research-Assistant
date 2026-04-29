@@ -1,12 +1,22 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 import logging
 from pathlib import Path
 from typing import Callable
 
-from .config import AppConfig, ConfigError, append_stock_to_universe, load_portfolio_symbols, refresh_stock_universe
-from .domain import ApprovalStatus, AssetClass, Candle, CompanyResearchReport, SignalSide
+from .config import (
+    AppConfig,
+    ConfigError,
+    append_stock_to_universe,
+    load_portfolio_holdings,
+    load_portfolio_symbols,
+    refresh_stock_universe,
+    remove_portfolio_holding,
+    upsert_portfolio_holding,
+)
+from .domain import ApprovalStatus, AssetClass, Candle, CompanyResearchReport, PortfolioHolding, SignalSide
 from .instruments import InstrumentFilter
 from .interfaces import ApprovalService, MarketDataProvider, StateStore
 from .market_data import MarketDataError
@@ -14,13 +24,22 @@ from .reporting import (
     SEPARATOR,
     format_pct,
     format_price,
+    format_signed_price,
     format_signed_pct,
     html_escape,
+    render_alert_removed,
+    render_alert_triggered,
+    render_alert_update,
+    render_alerts,
     render_company_report,
+    render_compare,
     render_error,
     render_no_strong_setup,
+    render_portfolio_update,
+    render_portfolio_usage,
     render_quick_research_report,
     render_shortlist,
+    render_watchlist,
 )
 from .risk import RiskEngine, RiskError
 from .strategy import UndervaluedStockEngine
@@ -207,6 +226,10 @@ class TradingBot:
         ranked = sorted(reports, key=self._research_rank, reverse=True)
         return ranked[:limit]
 
+    def list_watchlist_reports(self) -> list[CompanyResearchReport]:
+        reports = self._collect_research_reports()
+        return sorted(reports, key=self._research_rank, reverse=True)
+
     def send_tip(
         self,
         chat_id: str | int | None = None,
@@ -266,6 +289,43 @@ class TradingBot:
             return 0
         return len(candidates)
 
+    def send_watchlist(self, chat_id: str | int | None = None) -> int:
+        if not hasattr(self.approvals, "publish_text"):
+            return 0
+        self.logger.info("Building research watchlist view")
+        total = self.refresh_universe()
+        reports = self.list_watchlist_reports()
+        try:
+            self.approvals.publish_text(render_watchlist(reports, total), chat_id=chat_id)
+        except TelegramApiError as exc:
+            self.logger.warning("Telegram publish failed for watchlist response: %s", exc)
+            return 0
+        return len(reports)
+
+    def compare_stocks(self, symbols: tuple[str, ...], chat_id: str | int | None = None) -> int:
+        if not hasattr(self.approvals, "publish_text"):
+            return 0
+        normalized_symbols = tuple(dict.fromkeys(symbol.strip().upper() for symbol in symbols if symbol.strip()))[:5]
+        if len(normalized_symbols) < 2:
+            self.approvals.publish_text(render_compare([], normalized_symbols), chat_id=chat_id)
+            return 0
+        self.logger.info("Comparing stocks: %s", ", ".join(normalized_symbols))
+        self.refresh_universe()
+        reports: list[CompanyResearchReport] = []
+        for symbol in normalized_symbols:
+            try:
+                report = self.market_data.get_stock_analysis(symbol, list(self.config.universe.allowed_stocks))
+            except MarketDataError as exc:
+                self.logger.warning("Research data unavailable for compare symbol %s: %s", symbol, exc)
+                continue
+            reports.append(self._with_watchlist_status(report))
+        try:
+            self.approvals.publish_text(render_compare(reports, normalized_symbols), chat_id=chat_id)
+        except TelegramApiError as exc:
+            self.logger.warning("Telegram publish failed for compare response: %s", exc)
+            return 0
+        return len(reports)
+
     def analyze_stock(self, symbol: str, chat_id: str | int | None = None) -> int:
         normalized_symbol = symbol.strip().strip('"').strip("'").upper()
         if not normalized_symbol:
@@ -295,8 +355,8 @@ class TradingBot:
         if not hasattr(self.approvals, "publish_text"):
             return 0
         self.logger.info("Building portfolio daily performance report")
-        symbols = self.portfolio_symbols()
-        if not symbols:
+        holdings = self.portfolio_holdings()
+        if not holdings:
             try:
                 self.approvals.publish_text(
                     render_error("Portfolio Daily Report", "No portfolio symbols configured right now."),
@@ -311,8 +371,13 @@ class TradingBot:
         up_count = 0
         down_count = 0
         neutral_count = 0
+        daily_total_pnl = 0.0
+        has_daily_total = False
+        total_unrealized_pnl = 0.0
+        has_unrealized_total = False
         detail_lines: list[str] = []
-        for symbol in symbols:
+        for holding in holdings:
+            symbol = holding.symbol
             try:
                 candles = self.market_data.get_candles(symbol, "D1", 22)
                 if len(candles) < 2:
@@ -348,12 +413,37 @@ class TradingBot:
                     f"Current price: {html_escape(format_price(current_price))}",
                     f"Previous close: {html_escape(format_price(previous_close))}",
                     f"Daily move: {html_escape(format_signed_pct(move_pct))}",
+                ]
+            )
+            if holding.quantity is not None:
+                daily_pnl = (current_price - previous_close) * holding.quantity
+                daily_total_pnl += daily_pnl
+                has_daily_total = True
+                detail_lines.append(f"Quantity: {holding.quantity:g}")
+                detail_lines.append(f"Estimated daily P/L: {html_escape(format_signed_price(daily_pnl))}")
+            if holding.quantity is not None and holding.average_cost is not None:
+                unrealized_pnl = (current_price - holding.average_cost) * holding.quantity
+                unrealized_pct = (current_price - holding.average_cost) / holding.average_cost if holding.average_cost else None
+                total_unrealized_pnl += unrealized_pnl
+                has_unrealized_total = True
+                detail_lines.append(f"Average cost: {html_escape(format_price(holding.average_cost))}")
+                detail_lines.append(
+                    f"P/L since buy: {html_escape(format_signed_price(unrealized_pnl))} ({html_escape(format_signed_pct(unrealized_pct))})"
+                )
+            detail_lines.extend(
+                [
                     f"Possible reason: {html_escape(self._portfolio_reason(fundamentals, candles, move_pct))}",
                     "",
                 ]
             )
             generated += 1
         lines.extend([f"🟢 Up: {up_count}  | 🔴 Down: {down_count}  | ⚪ Neutral: {neutral_count}", ""])
+        if has_daily_total:
+            lines.append(f"Estimated daily portfolio P/L: {html_escape(format_signed_price(daily_total_pnl))}")
+        if has_unrealized_total:
+            lines.append(f"Portfolio P/L since buy: {html_escape(format_signed_price(total_unrealized_pnl))}")
+        if has_daily_total or has_unrealized_total:
+            lines.append("")
         lines.extend(detail_lines)
 
         try:
@@ -362,6 +452,157 @@ class TradingBot:
             self.logger.warning("Telegram publish failed for portfolio response: %s", exc)
             return 0
         return generated
+
+    def add_portfolio_holding(
+        self,
+        symbol: str,
+        quantity: float,
+        average_cost: float,
+        chat_id: str | int | None = None,
+    ) -> int:
+        return self._upsert_portfolio_holding("added", symbol, quantity, average_cost, chat_id)
+
+    def update_portfolio_holding(
+        self,
+        symbol: str,
+        quantity: float,
+        average_cost: float,
+        chat_id: str | int | None = None,
+    ) -> int:
+        return self._upsert_portfolio_holding("updated", symbol, quantity, average_cost, chat_id)
+
+    def _upsert_portfolio_holding(
+        self,
+        action: str,
+        symbol: str,
+        quantity: float,
+        average_cost: float,
+        chat_id: str | int | None,
+    ) -> int:
+        if not hasattr(self.approvals, "publish_text"):
+            return 0
+        normalized_symbol = symbol.strip().strip('"').strip("'").upper()
+        try:
+            self.market_data.get_candles(normalized_symbol, "D1", 5)
+            added, holding, total = upsert_portfolio_holding(
+                self._portfolio_path(),
+                normalized_symbol,
+                quantity,
+                average_cost,
+            )
+            changed = True if action == "updated" else added
+            self.approvals.publish_text(render_portfolio_update(action, holding, total, changed), chat_id=chat_id)
+        except (ConfigError, MarketDataError) as exc:
+            self.approvals.publish_text(render_error("Unable to update portfolio", exc), chat_id=chat_id)
+            return 0
+        except TelegramApiError as exc:
+            self.logger.warning("Telegram publish failed for portfolio update: %s", exc)
+            return 0
+        return 1
+
+    def remove_portfolio_holding(self, symbol: str, chat_id: str | int | None = None) -> int:
+        if not hasattr(self.approvals, "publish_text"):
+            return 0
+        try:
+            removed, normalized, total = remove_portfolio_holding(self._portfolio_path(), symbol)
+            self.approvals.publish_text(
+                render_portfolio_update("removed", normalized, total, changed=removed),
+                chat_id=chat_id,
+            )
+        except ConfigError as exc:
+            self.approvals.publish_text(render_error("Unable to update portfolio", exc), chat_id=chat_id)
+            return 0
+        except TelegramApiError as exc:
+            self.logger.warning("Telegram publish failed for portfolio remove: %s", exc)
+            return 0
+        return 1 if removed else 0
+
+    def send_portfolio_usage(self, chat_id: str | int | None = None) -> int:
+        if not hasattr(self.approvals, "publish_text"):
+            return 0
+        self.approvals.publish_text(render_portfolio_usage(), chat_id=chat_id)
+        return 0
+
+    def add_alert(self, symbol: str, threshold: float, chat_id: str | int | None = None) -> int:
+        if not hasattr(self.approvals, "publish_text"):
+            return 0
+        normalized_symbol = symbol.strip().strip('"').strip("'").upper()
+        if not normalized_symbol or threshold <= 0:
+            self.approvals.publish_text(render_error("Alert command", "Usage: /alert MSFT 15%"), chat_id=chat_id)
+            return 0
+        try:
+            self.market_data.get_stock_analysis(normalized_symbol, list(self.config.universe.allowed_stocks))
+            added, alert = self.state_store.upsert_alert(normalized_symbol, threshold)
+            self.approvals.publish_text(render_alert_update(alert["symbol"], alert["threshold"], added), chat_id=chat_id)
+        except MarketDataError as exc:
+            self.approvals.publish_text(render_error("Unable to create alert", exc), chat_id=chat_id)
+            return 0
+        except TelegramApiError as exc:
+            self.logger.warning("Telegram publish failed for alert update: %s", exc)
+            return 0
+        return 1
+
+    def send_alerts(self, chat_id: str | int | None = None) -> int:
+        if not hasattr(self.approvals, "publish_text"):
+            return 0
+        alerts = self.state_store.list_alerts()
+        self.approvals.publish_text(render_alerts(alerts), chat_id=chat_id)
+        return len(alerts)
+
+    def remove_alert(self, symbol: str, chat_id: str | int | None = None) -> int:
+        if not hasattr(self.approvals, "publish_text"):
+            return 0
+        removed, normalized, total = self.state_store.remove_alert(symbol)
+        self.approvals.publish_text(render_alert_removed(normalized, removed, total), chat_id=chat_id)
+        return 1 if removed else 0
+
+    def send_alert_usage(self, chat_id: str | int | None = None) -> int:
+        if not hasattr(self.approvals, "publish_text"):
+            return 0
+        self.approvals.publish_text(render_error("Alert command", "Usage: /alert MSFT 15%"), chat_id=chat_id)
+        return 0
+
+    def process_alerts(self) -> int:
+        if not hasattr(self.approvals, "publish_text"):
+            return 0
+        alerts = self.state_store.list_alerts()
+        if not alerts:
+            return 0
+        generated = 0
+        universe_symbols = list(self.config.universe.allowed_stocks)
+        now = datetime.now(timezone.utc)
+        for alert in alerts:
+            if self._alert_triggered_today(alert, now):
+                continue
+            symbol = str(alert["symbol"])
+            threshold = float(alert["threshold"])
+            try:
+                report = self.market_data.get_stock_analysis(symbol, universe_symbols)
+            except MarketDataError as exc:
+                self.logger.warning("Alert data unavailable for %s: %s", symbol, exc)
+                continue
+            if report.margin_of_safety is None or report.margin_of_safety < threshold:
+                continue
+            try:
+                self.approvals.publish_text(render_alert_triggered(report, threshold))
+            except TelegramApiError as exc:
+                self.logger.warning("Telegram publish failed for alert %s: %s", symbol, exc)
+                continue
+            self.state_store.mark_alert_triggered(symbol, now)
+            generated += 1
+        return generated
+
+    def _alert_triggered_today(self, alert: dict, now: datetime) -> bool:
+        last_triggered_at = alert.get("last_triggered_at")
+        if not isinstance(last_triggered_at, str) or not last_triggered_at:
+            return False
+        try:
+            triggered = datetime.fromisoformat(last_triggered_at)
+        except ValueError:
+            return False
+        if triggered.tzinfo is None:
+            triggered = triggered.replace(tzinfo=timezone.utc)
+        return triggered.astimezone(timezone.utc).date() == now.date()
 
     def send_help(self, chat_id: str | int | None = None) -> int:
         if not hasattr(self.approvals, "publish_text"):
@@ -384,9 +625,28 @@ class TradingBot:
             "/watch NVDA",
             "Add a company to your research universe.",
             "",
+            "/watchlist",
+            "Show the current research watchlist.",
+            "",
+            "/compare AAPL MSFT",
+            "Compare two to five companies.",
+            "",
             "<b>Portfolio</b>",
             "portfolio or /portfolio",
             "Show the daily performance of the stocks in config/portfolio.txt.",
+            "",
+            "/portfolio add MSFT 10 320.50",
+            "Add or replace a portfolio holding with quantity and average cost.",
+            "",
+            "/portfolio remove MSFT",
+            "Remove a holding from the portfolio.",
+            "",
+            "<b>Alerts</b>",
+            "/alert MSFT 15%",
+            "Alert when margin of safety reaches the chosen threshold.",
+            "",
+            "/alerts or /unalert MSFT",
+            "List or remove research alerts.",
             "",
             "<b>Aliases</b>",
             "analise MSFT or /analise MSFT",
@@ -405,6 +665,9 @@ class TradingBot:
 
     def portfolio_symbols(self) -> tuple[str, ...]:
         return load_portfolio_symbols(self._portfolio_path())
+
+    def portfolio_holdings(self) -> tuple[PortfolioHolding, ...]:
+        return load_portfolio_holdings(self._portfolio_path())
 
     def scan(self) -> int:
         if hasattr(self.approvals, "publish_text"):

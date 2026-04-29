@@ -128,6 +128,13 @@ class PerformanceSnapshot:
 
 
 @dataclass(frozen=True)
+class PortfolioHolding:
+    symbol: str
+    quantity: float | None = None
+    average_cost: float | None = None
+
+
+@dataclass(frozen=True)
 class StockFundamentals:
     symbol: str
     company_name: str | None

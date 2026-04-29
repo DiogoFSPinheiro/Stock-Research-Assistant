@@ -41,8 +41,10 @@ class TradingBotTests(unittest.TestCase):
     def setUp(self) -> None:
         self.state_path = Path(".test-artifacts") / f"orchestrator-state-{uuid.uuid4().hex}.json"
         self.universe_path = Path(".test-artifacts") / f"orchestrator-universe-{uuid.uuid4().hex}.txt"
+        self.portfolio_path = Path(".test-artifacts") / f"orchestrator-portfolio-{uuid.uuid4().hex}.txt"
         self.state_path.parent.mkdir(exist_ok=True)
         self.universe_path.write_text("AAPL\nMSFT\n", encoding="utf-8")
+        self.portfolio_path.write_text("AAPL\nMSFT\n", encoding="utf-8")
         self.config = AppConfig(
             market_data=MarketDataConfig("synthetic", "", "https://www.alphavantage.co/query", 20),
             risk=RiskConfig(100000, 0.005, 4, 0.02, 0.05, 2.0, 240),
@@ -59,7 +61,7 @@ class TradingBotTests(unittest.TestCase):
             auto_scan_minute=0,
             log_level="INFO",
             storage_path=self.state_path,
-            portfolio_path=self.universe_path,
+            portfolio_path=self.portfolio_path,
         )
         self.state_store = JsonStateStore(self.config.storage_path)
         self.market_data = RichSyntheticMarketDataProvider(self.config.universe)
@@ -85,6 +87,8 @@ class TradingBotTests(unittest.TestCase):
             self.state_path.unlink()
         if self.universe_path.exists():
             self.universe_path.unlink()
+        if self.portfolio_path.exists():
+            self.portfolio_path.unlink()
 
     def test_scan_publishes_ranked_shortlist_by_default(self) -> None:
         generated = self.bot.scan()
@@ -296,6 +300,64 @@ class TradingBotTests(unittest.TestCase):
         self.assertIn("Apple Inc. - AAPL", sent_messages[0])
         self.assertIn("Daily move:", sent_messages[0])
         self.assertIn("Possible reason:", sent_messages[0])
+
+    def test_portfolio_add_update_remove_commands_modify_portfolio_file(self) -> None:
+        sent_messages: list[str] = []
+        self.bot.approvals.http_post = lambda url, payload: sent_messages.append(payload["text"])
+
+        added = self.bot.add_portfolio_holding("NVDA", 2.5, 900, chat_id="chat")
+        updated = self.bot.update_portfolio_holding("NVDA", 3, 850, chat_id="chat")
+        after_update = self.portfolio_path.read_text(encoding="utf-8")
+        removed = self.bot.remove_portfolio_holding("NVDA", chat_id="chat")
+
+        self.assertEqual((added, updated, removed), (1, 1, 1))
+        self.assertEqual(self.bot.portfolio_symbols(), ("AAPL", "MSFT"))
+        self.assertIn("NVDA,3,850", after_update)
+        self.assertIn("Portfolio Updated", sent_messages[0])
+        self.assertIn("Average cost:", sent_messages[0])
+
+    def test_send_portfolio_report_includes_position_pnl_when_available(self) -> None:
+        sent_messages: list[str] = []
+        self.bot.approvals.http_post = lambda url, payload: sent_messages.append(payload["text"])
+        self.portfolio_path.write_text("MSFT,10,100\n", encoding="utf-8")
+
+        generated = self.bot.send_portfolio_report(chat_id="chat")
+
+        self.assertEqual(generated, 1)
+        self.assertIn("Quantity: 10", sent_messages[0])
+        self.assertIn("Estimated daily P/L:", sent_messages[0])
+        self.assertIn("P/L since buy:", sent_messages[0])
+        self.assertIn("Portfolio P/L since buy:", sent_messages[0])
+
+    def test_send_watchlist_and_compare_publish_research_views(self) -> None:
+        sent_messages: list[str] = []
+        self.bot.approvals.http_post = lambda url, payload: sent_messages.append(payload["text"])
+
+        watchlist_count = self.bot.send_watchlist(chat_id="chat")
+        compare_count = self.bot.compare_stocks(("AAPL", "MSFT"), chat_id="chat")
+
+        self.assertEqual(watchlist_count, 2)
+        self.assertEqual(compare_count, 2)
+        self.assertIn("Research Watchlist", sent_messages[0])
+        self.assertIn("Stock Compare", sent_messages[1])
+        self.assertIn("Best fit:", sent_messages[1])
+
+    def test_alerts_can_be_managed_and_trigger_once_per_day(self) -> None:
+        sent_messages: list[str] = []
+        self.bot.approvals.http_post = lambda url, payload: sent_messages.append(payload["text"])
+
+        added = self.bot.add_alert("MSFT", 0.05, chat_id="chat")
+        listed = self.bot.send_alerts(chat_id="chat")
+        triggered = self.bot.process_alerts()
+        duplicate = self.bot.process_alerts()
+        removed = self.bot.remove_alert("MSFT", chat_id="chat")
+
+        self.assertEqual(added, 1)
+        self.assertEqual(listed, 1)
+        self.assertEqual(triggered, 1)
+        self.assertEqual(duplicate, 0)
+        self.assertEqual(removed, 1)
+        self.assertTrue(any("Research Alert Triggered" in message for message in sent_messages))
 
     def test_portfolio_reason_explains_up_move_with_price_action_and_fundamentals(self) -> None:
         base_time = datetime(2026, 4, 1, tzinfo=timezone.utc)

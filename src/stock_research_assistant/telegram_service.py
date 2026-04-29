@@ -22,6 +22,7 @@ from .reporting import (
 
 HttpPost = Callable[[str, dict], None]
 HttpGet = Callable[[str], dict]
+TELEGRAM_MESSAGE_MAX_CHARS = 3900
 
 
 class TelegramApiError(RuntimeError):
@@ -52,6 +53,10 @@ class TelegramCommand:
     text: str
     symbol: str | None = None
     limit: int | None = None
+    symbols: tuple[str, ...] = ()
+    quantity: float | None = None
+    average_cost: float | None = None
+    threshold: float | None = None
 
 
 def _default_post(url: str, payload: dict) -> None:
@@ -134,6 +139,25 @@ class TelegramApprovalService:
                     text=update.text,
                     symbol=parts[1].upper(),
                 )
+        if first in {"/watchlist", "watchlist"}:
+            return TelegramCommand(
+                update_id=update.update_id,
+                kind="watchlist",
+                chat_id=update.chat_id,
+                actor=update.actor,
+                text=update.text,
+            )
+        if first in {"/compare", "compare"}:
+            symbols = tuple(part.upper() for part in parts[1:6])
+            kind = "compare" if len(symbols) >= 2 else "compare_invalid"
+            return TelegramCommand(
+                update_id=update.update_id,
+                kind=kind,
+                chat_id=update.chat_id,
+                actor=update.actor,
+                text=update.text,
+                symbols=symbols,
+            )
         if first in {"/analise", "analise", "/analyze", "analyze", "/analyse", "analyse"}:
             if len(parts) >= 2:
                 return TelegramCommand(
@@ -145,9 +169,95 @@ class TelegramApprovalService:
                     symbol=parts[1].upper(),
                 )
         if first in {"/portfolio", "portfolio"}:
+            if len(parts) >= 2:
+                action = parts[1].lower()
+                if action in {"add", "update"}:
+                    if len(parts) >= 5:
+                        quantity = _parse_float(parts[3])
+                        average_cost = _parse_float(parts[4])
+                        if quantity is not None and average_cost is not None:
+                            return TelegramCommand(
+                                update_id=update.update_id,
+                                kind=f"portfolio_{action}",
+                                chat_id=update.chat_id,
+                                actor=update.actor,
+                                text=update.text,
+                                symbol=parts[2].upper(),
+                                quantity=quantity,
+                                average_cost=average_cost,
+                            )
+                    return TelegramCommand(
+                        update_id=update.update_id,
+                        kind="portfolio_invalid",
+                        chat_id=update.chat_id,
+                        actor=update.actor,
+                        text=update.text,
+                    )
+                if action in {"remove", "delete"}:
+                    if len(parts) >= 3:
+                        return TelegramCommand(
+                            update_id=update.update_id,
+                            kind="portfolio_remove",
+                            chat_id=update.chat_id,
+                            actor=update.actor,
+                            text=update.text,
+                            symbol=parts[2].upper(),
+                        )
+                    return TelegramCommand(
+                        update_id=update.update_id,
+                        kind="portfolio_invalid",
+                        chat_id=update.chat_id,
+                        actor=update.actor,
+                        text=update.text,
+                    )
             return TelegramCommand(
                 update_id=update.update_id,
                 kind="portfolio",
+                chat_id=update.chat_id,
+                actor=update.actor,
+                text=update.text,
+            )
+        if first in {"/alert", "alert"}:
+            if len(parts) >= 3:
+                threshold = _parse_threshold(parts[2])
+                if threshold is not None:
+                    return TelegramCommand(
+                        update_id=update.update_id,
+                        kind="alert_add",
+                        chat_id=update.chat_id,
+                        actor=update.actor,
+                        text=update.text,
+                        symbol=parts[1].upper(),
+                        threshold=threshold,
+                    )
+            return TelegramCommand(
+                update_id=update.update_id,
+                kind="alert_invalid",
+                chat_id=update.chat_id,
+                actor=update.actor,
+                text=update.text,
+            )
+        if first in {"/alerts", "alerts"}:
+            return TelegramCommand(
+                update_id=update.update_id,
+                kind="alerts",
+                chat_id=update.chat_id,
+                actor=update.actor,
+                text=update.text,
+            )
+        if first in {"/unalert", "unalert"}:
+            if len(parts) >= 2:
+                return TelegramCommand(
+                    update_id=update.update_id,
+                    kind="alert_remove",
+                    chat_id=update.chat_id,
+                    actor=update.actor,
+                    text=update.text,
+                    symbol=parts[1].upper(),
+                )
+            return TelegramCommand(
+                update_id=update.update_id,
+                kind="alert_invalid",
                 chat_id=update.chat_id,
                 actor=update.actor,
                 text=update.text,
@@ -226,7 +336,8 @@ class TelegramApprovalService:
         target_chat_id = self._resolve_chat_id(chat_id)
         if not self.config.bot_token or not target_chat_id:
             return
-        self._send_message(target_chat_id, text)
+        for chunk in _split_telegram_text(text):
+            self._send_message(target_chat_id, chunk)
 
     def initialize(self) -> None:
         if self.config.drop_pending_updates_on_start:
@@ -300,4 +411,64 @@ class TelegramApprovalService:
         previous = self.recent_command_signatures.get(signature)
         self.recent_command_signatures[signature] = now
         return previous is not None and (now - previous) <= self.dedupe_window_seconds
+
+
+def _parse_float(value: str) -> float | None:
+    try:
+        parsed = float(value.replace(",", "."))
+    except ValueError:
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _split_telegram_text(text: str, limit: int = TELEGRAM_MESSAGE_MAX_CHARS) -> list[str]:
+    if len(text) <= limit:
+        return [text]
+
+    chunks: list[str] = []
+    current: list[str] = []
+    current_length = 0
+    for line in text.splitlines():
+        pending_lines = _split_long_line(line, limit)
+        for pending in pending_lines:
+            extra = 1 if current else 0
+            if current and current_length + extra + len(pending) > limit:
+                chunks.append("\n".join(current))
+                current = []
+                current_length = 0
+                extra = 0
+            current.append(pending)
+            current_length += extra + len(pending)
+    if current:
+        chunks.append("\n".join(current))
+    return chunks or [""]
+
+
+def _split_long_line(line: str, limit: int) -> list[str]:
+    if len(line) <= limit:
+        return [line]
+    parts: list[str] = []
+    remaining = line
+    while len(remaining) > limit:
+        split_at = remaining.rfind(" ", 0, limit)
+        if split_at <= 0:
+            split_at = limit
+        parts.append(remaining[:split_at].rstrip())
+        remaining = remaining[split_at:].lstrip()
+    if remaining:
+        parts.append(remaining)
+    return parts
+
+
+def _parse_threshold(value: str) -> float | None:
+    raw = value.strip().replace(",", ".")
+    is_percent = raw.endswith("%")
+    if is_percent:
+        raw = raw[:-1]
+    parsed = _parse_float(raw)
+    if parsed is None:
+        return None
+    if is_percent or parsed > 1:
+        parsed = parsed / 100
+    return parsed if parsed > 0 else None
 

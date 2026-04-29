@@ -125,8 +125,22 @@ def log_received_command(logger: Logger, command: object) -> None:
         symbol = getattr(command, "symbol", None) or "unknown"
         logger.info("Received Telegram command: %s. Adding %s to the watchlist.", text, symbol)
         return
+    if kind == "watchlist":
+        logger.info("Received Telegram command: %s. Building watchlist view.", text)
+        return
+    if kind == "compare":
+        symbols = ", ".join(getattr(command, "symbols", ()) or ())
+        logger.info("Received Telegram command: %s. Comparing %s.", text, symbols)
+        return
     if kind == "portfolio":
         logger.info("Received Telegram command: %s. Building portfolio daily performance report.", text)
+        return
+    if kind in {"portfolio_add", "portfolio_update", "portfolio_remove"}:
+        symbol = getattr(command, "symbol", None) or "unknown"
+        logger.info("Received Telegram command: %s. Updating portfolio for %s.", text, symbol)
+        return
+    if kind in {"alert_add", "alerts", "alert_remove"}:
+        logger.info("Received Telegram command: %s. Managing research alerts.", text)
         return
     if kind == "help":
         logger.info("Received Telegram command: %s. Showing help message.", text)
@@ -266,6 +280,18 @@ def main() -> int:
                                     chat_id=getattr(command, "chat_id", None),
                                 )
                         continue
+                    if kind == "watchlist":
+                        generated += bot.send_watchlist(chat_id=getattr(command, "chat_id", None))
+                        continue
+                    if kind == "compare":
+                        generated += bot.compare_stocks(
+                            tuple(getattr(command, "symbols", ()) or ()),
+                            chat_id=getattr(command, "chat_id", None),
+                        )
+                        continue
+                    if kind == "compare_invalid":
+                        generated += bot.compare_stocks((), chat_id=getattr(command, "chat_id", None))
+                        continue
                     if kind == "stock_analysis":
                         try:
                             generated += bot.analyze_stock(
@@ -284,6 +310,50 @@ def main() -> int:
                             chat_id=getattr(command, "chat_id", None),
                         )
                         continue
+                    if kind == "portfolio_add":
+                        generated += bot.add_portfolio_holding(
+                            getattr(command, "symbol", "") or "",
+                            float(getattr(command, "quantity", 0.0) or 0.0),
+                            float(getattr(command, "average_cost", 0.0) or 0.0),
+                            chat_id=getattr(command, "chat_id", None),
+                        )
+                        continue
+                    if kind == "portfolio_update":
+                        generated += bot.update_portfolio_holding(
+                            getattr(command, "symbol", "") or "",
+                            float(getattr(command, "quantity", 0.0) or 0.0),
+                            float(getattr(command, "average_cost", 0.0) or 0.0),
+                            chat_id=getattr(command, "chat_id", None),
+                        )
+                        continue
+                    if kind == "portfolio_remove":
+                        generated += bot.remove_portfolio_holding(
+                            getattr(command, "symbol", "") or "",
+                            chat_id=getattr(command, "chat_id", None),
+                        )
+                        continue
+                    if kind == "portfolio_invalid":
+                        generated += bot.send_portfolio_usage(chat_id=getattr(command, "chat_id", None))
+                        continue
+                    if kind == "alert_add":
+                        generated += bot.add_alert(
+                            getattr(command, "symbol", "") or "",
+                            float(getattr(command, "threshold", 0.0) or 0.0),
+                            chat_id=getattr(command, "chat_id", None),
+                        )
+                        continue
+                    if kind == "alerts":
+                        generated += bot.send_alerts(chat_id=getattr(command, "chat_id", None))
+                        continue
+                    if kind == "alert_remove":
+                        generated += bot.remove_alert(
+                            getattr(command, "symbol", "") or "",
+                            chat_id=getattr(command, "chat_id", None),
+                        )
+                        continue
+                    if kind == "alert_invalid":
+                        generated += bot.send_alert_usage(chat_id=getattr(command, "chat_id", None))
+                        continue
                     if kind == "help":
                         generated += bot.send_help(
                             chat_id=getattr(command, "chat_id", None),
@@ -294,6 +364,7 @@ def main() -> int:
                         allow_repeat=True,
                         notify_when_empty=True,
                     )
+                generated += bot.process_alerts()
                 processed = bot.process_approvals()
                 if ran_scheduled_scan or polled or processed or generated:
                     bot.logger.info("Cycle finished. Generated=%s polled=%s processed=%s", generated, polled, processed)

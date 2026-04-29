@@ -29,6 +29,7 @@ class JsonStateStore:
                     "performance": {"daily_pnl": 0.0, "weekly_pnl": 0.0},
                     "scheduled_scan": {"last_run_on": None},
                     "portfolio_report": {"last_run_on": None},
+                    "alerts": [],
                 }
             )
 
@@ -140,6 +141,79 @@ class JsonStateStore:
             portfolio_report = {}
         portfolio_report["last_run_on"] = day
         state["portfolio_report"] = portfolio_report
+        self._save(state)
+
+    def list_alerts(self) -> list[dict[str, Any]]:
+        state = self._load()
+        alerts = state.get("alerts", [])
+        if not isinstance(alerts, list):
+            return []
+        normalized: list[dict[str, Any]] = []
+        for item in alerts:
+            if not isinstance(item, dict):
+                continue
+            symbol = str(item.get("symbol") or "").strip().upper()
+            try:
+                threshold = float(item.get("threshold"))
+            except (TypeError, ValueError):
+                continue
+            if not symbol or threshold <= 0:
+                continue
+            normalized.append(
+                {
+                    "symbol": symbol,
+                    "threshold": threshold,
+                    "created_at": item.get("created_at"),
+                    "last_triggered_at": item.get("last_triggered_at"),
+                }
+            )
+        return normalized
+
+    def upsert_alert(self, symbol: str, threshold: float) -> tuple[bool, dict[str, Any]]:
+        normalized = symbol.strip().upper()
+        state = self._load()
+        alerts = self.list_alerts()
+        created_at = datetime.now(timezone.utc).isoformat()
+        new_alert = {
+            "symbol": normalized,
+            "threshold": threshold,
+            "created_at": created_at,
+            "last_triggered_at": None,
+        }
+        added = True
+        for index, item in enumerate(alerts):
+            if item["symbol"] == normalized:
+                new_alert["created_at"] = item.get("created_at") or created_at
+                new_alert["last_triggered_at"] = item.get("last_triggered_at")
+                alerts[index] = new_alert
+                added = False
+                break
+        if added:
+            alerts.append(new_alert)
+        state["alerts"] = alerts
+        self._save(state)
+        return added, new_alert
+
+    def remove_alert(self, symbol: str) -> tuple[bool, str, int]:
+        normalized = symbol.strip().upper()
+        state = self._load()
+        alerts = self.list_alerts()
+        remaining = [item for item in alerts if item["symbol"] != normalized]
+        removed = len(remaining) != len(alerts)
+        state["alerts"] = remaining
+        self._save(state)
+        return removed, normalized, len(remaining)
+
+    def mark_alert_triggered(self, symbol: str, triggered_at: datetime | None = None) -> None:
+        normalized = symbol.strip().upper()
+        state = self._load()
+        alerts = self.list_alerts()
+        timestamp = (triggered_at or datetime.now(timezone.utc)).isoformat()
+        for item in alerts:
+            if item["symbol"] == normalized:
+                item["last_triggered_at"] = timestamp
+                break
+        state["alerts"] = alerts
         self._save(state)
 
     def _load(self) -> dict[str, Any]:

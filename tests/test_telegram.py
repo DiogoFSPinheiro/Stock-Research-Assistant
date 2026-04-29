@@ -98,6 +98,16 @@ class TelegramApprovalServiceTests(unittest.TestCase):
         self.assertIn("Research window: D1", self.calls[0][1]["text"])
         self.assertNotIn("Entry Price:", self.calls[0][1]["text"])
 
+    def test_publish_text_splits_long_messages(self) -> None:
+        long_lines = [f"<b>Item {index}</b> " + ("x" * 180) for index in range(60)]
+
+        self.service.publish_text("\n".join(long_lines), chat_id=999)
+
+        self.assertGreater(len(self.calls), 1)
+        self.assertTrue(all(len(payload["text"]) <= 3900 for _url, payload in self.calls))
+        self.assertIn("<b>Item 0</b>", self.calls[0][1]["text"])
+        self.assertIn("<b>Item 59</b>", self.calls[-1][1]["text"])
+
     def test_poll_tip_requests_returns_tip_command_without_replying(self) -> None:
         self.responses.append(
             {
@@ -342,6 +352,141 @@ class TelegramApprovalServiceTests(unittest.TestCase):
             results,
             [TelegramCommand(update_id=159, kind="portfolio", chat_id=999, actor="alice", text="portfolio", symbol=None, limit=None)],
         )
+
+    def test_poll_commands_parses_portfolio_add_update_and_remove(self) -> None:
+        self.responses.append(
+            {
+                "ok": True,
+                "result": [
+                    {
+                        "update_id": 161,
+                        "message": {
+                            "chat": {"id": 999},
+                            "from": {"username": "alice"},
+                            "text": "/portfolio add msft 10 320.50",
+                        },
+                    },
+                    {
+                        "update_id": 162,
+                        "message": {
+                            "chat": {"id": 999},
+                            "from": {"username": "alice"},
+                            "text": "/portfolio update MSFT 12 315",
+                        },
+                    },
+                    {
+                        "update_id": 163,
+                        "message": {
+                            "chat": {"id": 999},
+                            "from": {"username": "alice"},
+                            "text": "/portfolio remove MSFT",
+                        },
+                    },
+                ],
+            }
+        )
+
+        results = self.service.poll_commands()
+
+        self.assertEqual(results[0].kind, "portfolio_add")
+        self.assertEqual(results[0].symbol, "MSFT")
+        self.assertEqual(results[0].quantity, 10.0)
+        self.assertEqual(results[0].average_cost, 320.5)
+        self.assertEqual(results[1].kind, "portfolio_update")
+        self.assertEqual(results[1].quantity, 12.0)
+        self.assertEqual(results[1].average_cost, 315.0)
+        self.assertEqual(results[2].kind, "portfolio_remove")
+        self.assertEqual(results[2].symbol, "MSFT")
+
+    def test_poll_commands_parses_watchlist_compare_and_alerts(self) -> None:
+        self.responses.append(
+            {
+                "ok": True,
+                "result": [
+                    {
+                        "update_id": 164,
+                        "message": {
+                            "chat": {"id": 999},
+                            "from": {"username": "alice"},
+                            "text": "/watchlist",
+                        },
+                    },
+                    {
+                        "update_id": 165,
+                        "message": {
+                            "chat": {"id": 999},
+                            "from": {"username": "alice"},
+                            "text": "/compare aapl msft nvda",
+                        },
+                    },
+                    {
+                        "update_id": 166,
+                        "message": {
+                            "chat": {"id": 999},
+                            "from": {"username": "alice"},
+                            "text": "/alert MSFT 15%",
+                        },
+                    },
+                    {
+                        "update_id": 167,
+                        "message": {
+                            "chat": {"id": 999},
+                            "from": {"username": "alice"},
+                            "text": "/alerts",
+                        },
+                    },
+                    {
+                        "update_id": 168,
+                        "message": {
+                            "chat": {"id": 999},
+                            "from": {"username": "alice"},
+                            "text": "/unalert MSFT",
+                        },
+                    },
+                ],
+            }
+        )
+
+        results = self.service.poll_commands()
+
+        self.assertEqual(results[0].kind, "watchlist")
+        self.assertEqual(results[1].kind, "compare")
+        self.assertEqual(results[1].symbols, ("AAPL", "MSFT", "NVDA"))
+        self.assertEqual(results[2].kind, "alert_add")
+        self.assertEqual(results[2].symbol, "MSFT")
+        self.assertEqual(results[2].threshold, 0.15)
+        self.assertEqual(results[3].kind, "alerts")
+        self.assertEqual(results[4].kind, "alert_remove")
+
+    def test_poll_commands_marks_invalid_portfolio_and_compare_commands(self) -> None:
+        self.responses.append(
+            {
+                "ok": True,
+                "result": [
+                    {
+                        "update_id": 169,
+                        "message": {
+                            "chat": {"id": 999},
+                            "from": {"username": "alice"},
+                            "text": "/portfolio add MSFT ten 320",
+                        },
+                    },
+                    {
+                        "update_id": 170,
+                        "message": {
+                            "chat": {"id": 999},
+                            "from": {"username": "alice"},
+                            "text": "/compare AAPL",
+                        },
+                    },
+                ],
+            }
+        )
+
+        results = self.service.poll_commands()
+
+        self.assertEqual(results[0].kind, "portfolio_invalid")
+        self.assertEqual(results[1].kind, "compare_invalid")
 
     def test_poll_commands_parses_help(self) -> None:
         self.responses.append(

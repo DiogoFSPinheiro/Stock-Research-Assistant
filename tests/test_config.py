@@ -11,9 +11,13 @@ from stock_research_assistant.config import (
     TelegramConfig,
     append_stock_to_universe,
     load_dotenv,
+    load_portfolio_holdings,
     load_stock_universe,
     normalize_stock_symbol,
+    remove_portfolio_holding,
+    upsert_portfolio_holding,
 )
+from stock_research_assistant.domain import PortfolioHolding
 
 
 class ConfigTests(unittest.TestCase):
@@ -81,6 +85,41 @@ class ConfigTests(unittest.TestCase):
         finally:
             if universe_path.exists():
                 universe_path.unlink()
+
+    def test_portfolio_holdings_support_legacy_and_position_rows(self) -> None:
+        artifacts = Path(".test-artifacts")
+        artifacts.mkdir(exist_ok=True)
+        portfolio_path = artifacts / "portfolio-holdings.txt"
+        portfolio_path.write_text("AAPL\nmsft,10,320.50\n# comment\n", encoding="utf-8")
+        try:
+            self.assertEqual(
+                load_portfolio_holdings(portfolio_path),
+                (
+                    PortfolioHolding("AAPL", None, None),
+                    PortfolioHolding("MSFT", 10.0, 320.5),
+                ),
+            )
+
+            added, holding, total = upsert_portfolio_holding(portfolio_path, "nvda", 2.5, 900)
+            updated, updated_holding, updated_total = upsert_portfolio_holding(portfolio_path, "MSFT", 12, 315)
+            removed, symbol, remaining = remove_portfolio_holding(portfolio_path, "AAPL")
+
+            self.assertTrue(added)
+            self.assertEqual(holding, PortfolioHolding("NVDA", 2.5, 900.0))
+            self.assertEqual(total, 3)
+            self.assertFalse(updated)
+            self.assertEqual(updated_holding, PortfolioHolding("MSFT", 12.0, 315.0))
+            self.assertEqual(updated_total, 3)
+            self.assertTrue(removed)
+            self.assertEqual(symbol, "AAPL")
+            self.assertEqual(remaining, 2)
+            self.assertEqual(
+                portfolio_path.read_text(encoding="utf-8").splitlines(),
+                ["MSFT,12,315", "NVDA,2.5,900"],
+            )
+        finally:
+            if portfolio_path.exists():
+                portfolio_path.unlink()
 
 
 if __name__ == "__main__":

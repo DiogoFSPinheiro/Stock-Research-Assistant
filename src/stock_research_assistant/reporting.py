@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from html import escape
 
-from .domain import CompanyResearchReport, Signal
+from .domain import CompanyResearchReport, PortfolioHolding, Signal
 
 
 SEPARATOR = "━━━━━━━━━━━━━━━━━━━━"
@@ -22,6 +22,13 @@ def format_signed_pct(value: float | None) -> str:
 
 def format_price(value: float | None) -> str:
     return "n/a" if value is None else f"${value:,.2f}"
+
+
+def format_signed_price(value: float | None) -> str:
+    if value is None:
+        return "n/a"
+    sign = "+" if value >= 0 else "-"
+    return f"{sign}${abs(value):,.2f}"
 
 
 def format_score(value: float | None) -> str:
@@ -97,6 +104,145 @@ def render_shortlist(reports: list[CompanyResearchReport], requested_limit: int)
         lines.append(f"⚠️ Main risk: {html_escape(report.key_risk)}")
         lines.append("")
     return "\n".join(lines).strip()
+
+
+def render_watchlist(reports: list[CompanyResearchReport], total_symbols: int) -> str:
+    if not reports:
+        return "\n".join(
+            [
+                "<b>Research Watchlist</b>",
+                SEPARATOR,
+                "",
+                "No watchlist symbols could be analyzed right now.",
+            ]
+        )
+    lines = ["<b>Research Watchlist</b>", SEPARATOR, f"{len(reports)} of {total_symbols} tracked stocks analyzed.", ""]
+    for index, report in enumerate(reports, start=1):
+        lines.extend(
+            [
+                f"<b>{index}. {html_escape(format_company_label(report.symbol, report.company_name))}</b>",
+                f"Stance: {html_escape(report.recommendation)}",
+                f"Investment score: {html_escape(format_score(report.investment_score))}",
+                f"Margin of safety: {html_escape(format_signed_pct(report.margin_of_safety))}",
+                f"Data quality: {html_escape(_data_quality_label(report))} ({report.data_quality_score:.0%})",
+                f"Main risk: {html_escape(report.key_risk)}",
+                "",
+            ]
+        )
+    return "\n".join(lines).strip()
+
+
+def render_compare(reports: list[CompanyResearchReport], requested_symbols: tuple[str, ...]) -> str:
+    if len(requested_symbols) < 2:
+        return render_error("Compare", "Usage: /compare AAPL MSFT")
+    if not reports:
+        return render_error("Compare", "No requested symbols could be analyzed right now.")
+    ranked = sorted(
+        reports,
+        key=lambda report: (
+            report.investment_score,
+            report.margin_of_safety if report.margin_of_safety is not None else float("-inf"),
+            report.data_quality_score,
+        ),
+        reverse=True,
+    )
+    winner = ranked[0]
+    lines = [
+        "<b>Stock Compare</b>",
+        SEPARATOR,
+        f"Best fit: {html_escape(format_company_label(winner.symbol, winner.company_name))}",
+        "",
+    ]
+    for report in ranked:
+        lines.extend(
+            [
+                f"<b>{html_escape(format_company_label(report.symbol, report.company_name))}</b>",
+                f"Stance: {html_escape(report.recommendation)} | Score: {html_escape(format_score(report.investment_score))}",
+                f"Price/Fair value: {html_escape(format_price(report.current_price))} / {html_escape(format_price(report.intrinsic_value))}",
+                f"Margin of safety: {html_escape(format_signed_pct(report.margin_of_safety))}",
+                f"Quality/Data: {html_escape(format_score(report.quality_score))} / {report.data_quality_score:.0%}",
+                f"Risk: {html_escape(report.key_risk)}",
+                "",
+            ]
+        )
+    missing = [symbol for symbol in requested_symbols if symbol not in {report.symbol for report in reports}]
+    if missing:
+        lines.append(f"Unavailable: {html_escape(', '.join(missing))}")
+    return "\n".join(lines).strip()
+
+
+def render_portfolio_update(action: str, holding: PortfolioHolding | str, total: int, changed: bool = True) -> str:
+    symbol = holding.symbol if isinstance(holding, PortfolioHolding) else holding
+    detail = ""
+    if isinstance(holding, PortfolioHolding) and holding.quantity is not None and holding.average_cost is not None:
+        detail = f"\nQuantity: {holding.quantity:g}\nAverage cost: {html_escape(format_price(holding.average_cost))}"
+    status = "updated" if changed else "unchanged"
+    return "\n".join(
+        [
+            "<b>Portfolio Updated</b>",
+            SEPARATOR,
+            "",
+            f"{html_escape(symbol)} {html_escape(action)} ({status}).{detail}",
+            "",
+            f"Total portfolio stocks: {total}",
+        ]
+    )
+
+
+def render_portfolio_usage() -> str:
+    return render_error(
+        "Portfolio command",
+        "Usage: /portfolio add MSFT 10 320.50, /portfolio update MSFT 12 315.00, or /portfolio remove MSFT",
+    )
+
+
+def render_alert_update(symbol: str, threshold: float, added: bool) -> str:
+    return "\n".join(
+        [
+            "<b>Alert Updated</b>",
+            SEPARATOR,
+            "",
+            f"{html_escape(symbol)} alert {'created' if added else 'updated'}.",
+            f"Triggers when margin of safety reaches {html_escape(format_pct(threshold))}.",
+        ]
+    )
+
+
+def render_alerts(alerts: list[dict]) -> str:
+    if not alerts:
+        return "\n".join(["<b>Alerts</b>", SEPARATOR, "", "No active alerts."])
+    lines = ["<b>Alerts</b>", SEPARATOR, ""]
+    for item in alerts:
+        lines.append(f"{html_escape(item['symbol'])}: margin of safety >= {html_escape(format_pct(item['threshold']))}")
+    return "\n".join(lines)
+
+
+def render_alert_removed(symbol: str, removed: bool, total: int) -> str:
+    status = "removed" if removed else "not found"
+    return "\n".join(
+        [
+            "<b>Alerts</b>",
+            SEPARATOR,
+            "",
+            f"{html_escape(symbol)} alert {status}.",
+            f"Active alerts: {total}",
+        ]
+    )
+
+
+def render_alert_triggered(report: CompanyResearchReport, threshold: float) -> str:
+    return "\n".join(
+        [
+            "<b>Research Alert Triggered</b>",
+            SEPARATOR,
+            "",
+            f"<b>{html_escape(format_company_label(report.symbol, report.company_name))}</b>",
+            f"Margin of safety: {html_escape(format_signed_pct(report.margin_of_safety))}",
+            f"Alert threshold: {html_escape(format_pct(threshold))}",
+            f"Stance: {html_escape(report.recommendation)}",
+            f"Main risk: {html_escape(report.key_risk)}",
+        ]
+    )
 
 
 def render_quick_research_report(report: CompanyResearchReport, best_idea: bool = False) -> str:
