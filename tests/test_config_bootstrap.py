@@ -65,7 +65,7 @@ class ConfigBootstrapTests(unittest.TestCase):
         self.assertEqual(config.telegram.bot_token, "")
         self.assertEqual(config.telegram.chat_id, "")
         self.assertTrue(config.telegram.drop_pending_updates_on_start)
-        self.assertEqual(config.poll_seconds, 1800)
+        self.assertEqual(config.poll_seconds, 300)
         self.assertEqual(config.auto_scan_hour, 9)
         self.assertEqual(config.auto_scan_minute, 0)
         self.assertEqual(config.storage_path, Path("data/state.json"))
@@ -114,14 +114,13 @@ class ConfigBootstrapTests(unittest.TestCase):
     def test_env_example_matches_safe_local_bootstrap_assumptions(self) -> None:
         values = _parse_env_file(Path(".env.example"))
 
-        self.assertEqual(values["BOT_MODE"], "signal_only")
+        self.assertNotIn("BOT_MODE", values)
         self.assertEqual(values["BOT_PORTFOLIO_PATH"], "config/portfolio.txt")
         self.assertEqual(values["MARKET_DATA_PROVIDER"], "yfinance")
-        self.assertEqual(values["YFINANCE_PERIOD"], "1y")
-        self.assertEqual(values["YFINANCE_INTERVAL"], "1d")
         self.assertEqual(values["TELEGRAM_BOT_TOKEN"], "replace-me")
         self.assertEqual(values["TELEGRAM_CHAT_ID"], "replace-me")
-        self.assertEqual(values["BOT_ALLOWED_TIMEFRAMES"], "D1")
+        self.assertNotIn("YFINANCE_PERIOD", values)
+        self.assertNotIn("BOT_ALLOWED_TIMEFRAMES", values)
 
 
 if __name__ == "__main__":

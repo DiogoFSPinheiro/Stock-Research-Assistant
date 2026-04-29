@@ -6,13 +6,13 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-555555)
 ![Focus](https://img.shields.io/badge/focus-Equity%20Research-gold)
 
-A research-first Telegram assistant for screening companies, estimating fair value, and surfacing potentially undervalued stocks from a personal watchlist.
+A research-first Telegram assistant for screening companies, estimating fair value, ranking watchlist ideas, and summarizing owned portfolio moves.
 
 ## Overview
 
-This project began as a market-ideas bot and has since been refocused into a company-analysis workflow. The current product is designed to help identify attractive equity ideas, generate concise research reports, and maintain a watchlist and portfolio view through Telegram.
+This project began as a market-ideas bot and has since been refocused into an equity-research workflow. The current product is designed to help identify attractive companies, generate concise research reports, and maintain a watchlist and portfolio view through Telegram.
 
-The runtime no longer centers on broker execution. Its primary purpose is equity research, valuation support, and idea prioritization.
+The runtime no longer centers on trade execution. `/top` and `/tip` now publish research summaries, not trade signals, order proposals, entries, stop losses, or position sizes.
 
 ## Tech Stack
 
@@ -25,64 +25,106 @@ The runtime no longer centers on broker execution. Its primary purpose is equity
 
 ## Core Capabilities
 
-- Screen a stock watchlist for quality-value opportunities
-- Rank and deliver a shortlist of top research ideas
-- Generate single-company research reports with valuation context
-- Summarize margin of safety, business quality, catalysts, and key risks
+- Screen a stock watchlist for quality-value research ideas
+- Rank current ideas by investment score, margin of safety, model confidence, data quality, and business quality
+- Generate quick single-company research checks
+- Generate full company research reports with valuation model breakdowns
+- Summarize intrinsic value, valuation range, analyst target, business quality, catalysts, and key risks
 - Maintain a research watchlist separately from an owned portfolio list
-- Support legacy command aliases while transitioning to a research-first command set
+- Summarize daily portfolio moves from `config/portfolio.txt`
 
 ## Command Reference
 
-### Primary Commands
+### Research
 
-- `/top 3`
-  Return a ranked shortlist of current research ideas.
+- `/top 5`
+  Return a ranked shortlist of current research ideas from the watchlist. The output highlights stance, investment score, intrinsic value, margin of safety, data quality, thesis, and main risk.
+
+- `/tip`
+  Return the single best research idea currently passing the screen.
+
+- `/tip MSFT`
+  Return a quick research check for one company. This is a compact version of `/analise`, with stance, valuation range, data quality, model confidence, thesis, risk, and suggested action.
+
+- `/analise MSFT`
+  Generate a full company research report with valuation models, peer context, catalysts, downside risk, and watchlist status.
+
 - `/analyze MSFT`
-  Generate a detailed company research report.
+  English alias for `/analise MSFT`.
+
+### Watchlist And Portfolio
+
 - `/watch NVDA`
-  Add a symbol to the research watchlist.
+  Add a symbol to the research watchlist file.
+
 - `/portfolio`
   Show the current daily move summary for holdings in `config/portfolio.txt`.
+
 - `/help`
   Display the available commands.
 
 ### Compatibility Aliases
 
-These remain available for backward compatibility:
+These remain available:
 
-- `/tip`
-- `/tip MSFT`
+- `top 5`
+- `tips 5`
+- `tip`
+- `tip MSFT`
 - `analise MSFT`
-- `/analise MSFT`
+- `analyze MSFT`
+- `analyse MSFT`
 - `add NVDA`
 - `/add NVDA`
 
 ## Research Output
 
-### Shortlist Output
+### Top Shortlist
 
-Each ranked idea highlights:
+Each ranked idea includes:
 
 - company name and ticker
-- estimated fair value
+- stance: `BUY`, `HOLD`, or `SELL`
+- investment score
+- intrinsic value estimate
 - margin of safety
 - business quality score
-- why the idea is interesting now
-- primary risk
+- data quality
+- thesis summary
+- main risk
 
-### Company Research Report
+### Quick Research Check
 
-Each detailed report includes:
+`/tip SYMBOL` includes:
+
+- current price
+- intrinsic value
+- valuation range
+- margin of safety
+- data quality
+- model confidence
+- best and weakest valuation model
+- thesis summary
+- main risk
+- suggested action
+
+### Full Company Research Report
+
+`/analise SYMBOL` includes:
 
 - current price
 - intrinsic value estimate
+- valuation range
+- quality-adjusted fair value
 - analyst target
 - margin of safety
-- business quality
+- model confidence
+- quality score
 - peer context
-- stance such as `BUY`, `HOLD`, or `SELL`
-- thesis summary
+- data quality summary
+- investment score
+- valuation model breakdown
+- thesis
 - catalysts
 - downside / key-risk summary
 - watchlist status and suggested action
@@ -91,9 +133,9 @@ Each detailed report includes:
 
 ```text
 src/stock_research_assistant/   Application code
-config/                Watchlist and portfolio files
-data/                  Local JSON state
-tests/                 Unit test suite
+config/                         Watchlist and portfolio files
+data/                           Local JSON state
+tests/                          Unit test suite
 ```
 
 ## Installation
@@ -118,7 +160,7 @@ python -m pip install -e .
 
 ## Configuration
 
-Create a `.env` file in the repository root and populate the required Telegram values.
+Create a `.env` file in the repository root and populate the required Telegram values. See `.env.example` for the current baseline.
 
 Important settings:
 
@@ -133,29 +175,34 @@ Important settings:
 Notes:
 
 - `BOT_STOCK_UNIVERSE_PATH` points to the research watchlist file.
-- `BOT_PORTFOLIO_PATH` points to owned holdings and is intentionally separate.
-- `MARKET_DATA_PROVIDER=yfinance` is the default live-data path.
-- `BOT_ALLOWED_TIMEFRAMES` and some risk-oriented settings remain for compatibility with the earlier scoring engine.
+- `BOT_ALLOWED_STOCKS` is only used as a fallback when the watchlist file is empty or missing.
+- `BOT_PORTFOLIO_PATH` points to owned holdings and is intentionally separate from the research watchlist.
+- `MARKET_DATA_PROVIDER=yfinance` is the default live-data path for research reports.
+- `MARKET_DATA_PROVIDER=synthetic` is useful for local dry runs and tests.
 
-See `.env.example` for a baseline configuration template.
+## Running The Assistant
 
-## Running the Assistant
+### Start The Application
 
-### Start the Application
-
-Preferred entrypoint:
+Preferred entrypoint after installing the package:
 
 ```powershell
 stock-research-assistant
 ```
 
-Direct virtualenv execution:
+Direct module execution:
 
 ```powershell
-.\.venv\Scripts\stock-research-assistant.exe
+python -m stock_research_assistant
 ```
 
-### Run the Test Suite
+If the console command is missing, reinstall the local package:
+
+```powershell
+python -m pip install -e .
+```
+
+### Run The Test Suite
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
@@ -175,7 +222,7 @@ Typical production setup:
 
 The application does not require an inbound web port for normal operation. It primarily needs outbound internet access for Telegram and market data.
 
-## Scope and Positioning
+## Scope And Positioning
 
 This repository is best understood as a personal equity-research assistant rather than an execution bot. It is optimized for:
 
