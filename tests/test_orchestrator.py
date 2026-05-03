@@ -324,7 +324,9 @@ class TradingBotTests(unittest.TestCase):
         generated = self.bot.send_portfolio_report(chat_id="chat")
 
         self.assertEqual(generated, 1)
-        self.assertIn("Quantity: 10", sent_messages[0])
+        self.assertNotIn("Quantity:", sent_messages[0])
+        self.assertNotIn("Previous close:", sent_messages[0])
+        self.assertNotIn("Average cost:", sent_messages[0])
         self.assertIn("Estimated daily P/L:", sent_messages[0])
         self.assertIn("P/L since buy:", sent_messages[0])
         self.assertIn("Portfolio P/L since buy:", sent_messages[0])
@@ -341,6 +343,21 @@ class TradingBotTests(unittest.TestCase):
         self.assertIn("Research Watchlist", sent_messages[0])
         self.assertIn("Stock Compare", sent_messages[1])
         self.assertIn("Best fit:", sent_messages[1])
+
+    def test_discover_stocks_excludes_watchlist_and_suggests_watch_command(self) -> None:
+        sent_messages: list[str] = []
+        self.bot.approvals.http_post = lambda url, payload: sent_messages.append(payload["text"])
+        self.bot.market_data.discover_stock_symbols = lambda mode=None, limit=50: ("AAPL", "ASML", "TSM", "MSFT")
+
+        generated = self.bot.discover_stocks(chat_id="chat", limit=2, mode="value")
+
+        self.assertEqual(generated, 2)
+        self.assertEqual(len(sent_messages), 1)
+        self.assertIn("Discovery Ideas", sent_messages[0])
+        self.assertIn("ASML", sent_messages[0])
+        self.assertIn("TSM", sent_messages[0])
+        self.assertNotIn("Apple Inc. (AAPL)", sent_messages[0])
+        self.assertIn("Add with: /watch ASML", sent_messages[0])
 
     def test_alerts_can_be_managed_and_trigger_once_per_day(self) -> None:
         sent_messages: list[str] = []

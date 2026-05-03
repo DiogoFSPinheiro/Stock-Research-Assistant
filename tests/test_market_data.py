@@ -270,6 +270,33 @@ class MarketDataProviderTests(unittest.TestCase):
         self.assertEqual(data.free_cash_flow, 60_000_000.0)
         self.assertEqual(data.enterprise_value, 900_000_000.0)
 
+    def test_yfinance_discovery_reads_screen_symbols(self) -> None:
+        calls: list[tuple[str, int]] = []
+
+        def fake_screen(query: str, count: int = 50) -> dict:
+            calls.append((query, count))
+            return {
+                "quotes": [
+                    {"symbol": "AAPL"},
+                    {"symbol": "MSFT"},
+                    {"symbol": "EURUSD=X"},
+                    {"ticker": "ASML"},
+                    {"symbol": "^GSPC"},
+                ]
+            }
+
+        provider = YFinanceMarketDataProvider(
+            MarketDataConfig("yfinance", "", "", 20),
+            self.universe,
+            ticker_factory=lambda symbol: object(),
+            screen_function=fake_screen,
+        )
+
+        symbols = provider.discover_stock_symbols(mode="value", limit=3)
+
+        self.assertEqual(symbols, ("AAPL", "MSFT", "ASML"))
+        self.assertEqual(calls, [("undervalued_large_caps", 10)])
+
     def test_synthetic_provider_can_build_stock_analysis(self) -> None:
         provider = SyntheticMarketDataProvider(self.universe)
 

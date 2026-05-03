@@ -5,7 +5,7 @@ from html import escape
 from .domain import CompanyResearchReport, PortfolioHolding, Signal
 
 
-SEPARATOR = "━━━━━━━━━━━━━━━━━━━━"
+SEPARATOR = "━━━━━━━━━━"
 
 
 def html_escape(value: object) -> str:
@@ -168,6 +168,41 @@ def render_compare(reports: list[CompanyResearchReport], requested_symbols: tupl
     missing = [symbol for symbol in requested_symbols if symbol not in {report.symbol for report in reports}]
     if missing:
         lines.append(f"Unavailable: {html_escape(', '.join(missing))}")
+    return "\n".join(lines).strip()
+
+
+def render_discovery(reports: list[CompanyResearchReport], requested_limit: int, mode: str | None = None) -> str:
+    label = f" ({mode})" if mode else ""
+    if not reports:
+        return "\n".join(
+            [
+                f"<b>Discovery Ideas{html_escape(label)}</b>",
+                SEPARATOR,
+                "",
+                "No new stocks passed the discovery screen right now.",
+                "Try /discover value, /discover growth, or /discover active later.",
+            ]
+        )
+    lines = [
+        f"<b>Discovery Ideas{html_escape(label)}</b>",
+        SEPARATOR,
+        f"{len(reports)} of {requested_limit} requested ideas found outside your watchlist.",
+        "",
+    ]
+    for index, report in enumerate(reports, start=1):
+        lines.extend(
+            [
+                f"<b>{index}. {html_escape(format_company_label(report.symbol, report.company_name))}</b>",
+                f"Stance: {html_escape(report.recommendation)}",
+                f"Investment score: {html_escape(format_score(report.investment_score))}",
+                f"Intrinsic value: {html_escape(format_price(report.intrinsic_value))}",
+                f"Margin of safety: {html_escape(format_signed_pct(report.margin_of_safety))}",
+                f"Data quality: {html_escape(_data_quality_label(report))} ({report.data_quality_score:.0%})",
+                f"Main risk: {html_escape(report.key_risk)}",
+                f"Add with: /watch {html_escape(report.symbol)}",
+                "",
+            ]
+        )
     return "\n".join(lines).strip()
 
 

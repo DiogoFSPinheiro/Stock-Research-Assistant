@@ -132,6 +132,14 @@ def log_received_command(logger: Logger, command: object) -> None:
         symbols = ", ".join(getattr(command, "symbols", ()) or ())
         logger.info("Received Telegram command: %s. Comparing %s.", text, symbols)
         return
+    if kind == "discover":
+        logger.info(
+            "Received Telegram command: %s. Discovering market ideas with mode=%s limit=%s.",
+            text,
+            getattr(command, "mode", None) or "default",
+            getattr(command, "limit", None) or 5,
+        )
+        return
     if kind == "portfolio":
         logger.info("Received Telegram command: %s. Building portfolio daily performance report.", text)
         return
@@ -291,6 +299,13 @@ def main() -> int:
                         continue
                     if kind == "compare_invalid":
                         generated += bot.compare_stocks((), chat_id=getattr(command, "chat_id", None))
+                        continue
+                    if kind == "discover":
+                        generated += bot.discover_stocks(
+                            chat_id=getattr(command, "chat_id", None),
+                            limit=getattr(command, "limit", None) or 5,
+                            mode=getattr(command, "mode", None),
+                        )
                         continue
                     if kind == "stock_analysis":
                         try:

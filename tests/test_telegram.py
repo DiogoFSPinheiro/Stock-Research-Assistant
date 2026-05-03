@@ -458,6 +458,40 @@ class TelegramApprovalServiceTests(unittest.TestCase):
         self.assertEqual(results[3].kind, "alerts")
         self.assertEqual(results[4].kind, "alert_remove")
 
+    def test_poll_commands_parses_discover_with_mode_and_limit(self) -> None:
+        self.responses.append(
+            {
+                "ok": True,
+                "result": [
+                    {
+                        "update_id": 171,
+                        "message": {
+                            "chat": {"id": 999},
+                            "from": {"username": "alice"},
+                            "text": "/discover value 7",
+                        },
+                    },
+                    {
+                        "update_id": 172,
+                        "message": {
+                            "chat": {"id": 999},
+                            "from": {"username": "alice"},
+                            "text": "/discover 12 growth",
+                        },
+                    },
+                ],
+            }
+        )
+
+        results = self.service.poll_commands()
+
+        self.assertEqual(results[0].kind, "discover")
+        self.assertEqual(results[0].mode, "value")
+        self.assertEqual(results[0].limit, 7)
+        self.assertEqual(results[1].kind, "discover")
+        self.assertEqual(results[1].mode, "growth")
+        self.assertEqual(results[1].limit, 10)
+
     def test_poll_commands_marks_invalid_portfolio_and_compare_commands(self) -> None:
         self.responses.append(
             {

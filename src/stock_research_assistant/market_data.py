@@ -19,6 +19,20 @@ class MarketDataError(RuntimeError):
 
 HttpGet = Callable[[str, int], dict]
 TickerFactory = Callable[[str], Any]
+ScreenFunction = Callable[..., dict]
+
+DISCOVERY_SCREENER_MODES: dict[str, tuple[str, ...]] = {
+    "value": ("undervalued_large_caps", "undervalued_growth_stocks"),
+    "growth": ("growth_technology_stocks", "undervalued_growth_stocks"),
+    "active": ("most_actives", "day_gainers"),
+    "anchors": ("portfolio_anchors", "undervalued_large_caps"),
+    "default": (
+        "undervalued_large_caps",
+        "undervalued_growth_stocks",
+        "portfolio_anchors",
+        "growth_technology_stocks",
+    ),
+}
 
 
 def _default_get_json(url: str, timeout: int) -> dict:
@@ -33,6 +47,14 @@ def _default_yfinance_ticker(symbol: str) -> Any:
     except ImportError as exc:  # pragma: no cover - depends on runtime environment
         raise MarketDataError("yfinance is not installed. Run `python -m pip install -e .` in the project venv.") from exc
     return yf.Ticker(symbol)
+
+
+def _default_yfinance_screen(query: str, count: int = 50) -> dict:
+    try:
+        import yfinance as yf
+    except ImportError as exc:  # pragma: no cover - depends on runtime environment
+        raise MarketDataError("yfinance is not installed. Run `python -m pip install -e .` in the project venv.") from exc
+    return yf.screen(query, count=count)
 
 
 def _is_retryable_market_data_exception(exc: Exception) -> bool:
@@ -117,6 +139,24 @@ def _provider_symbol(symbol: str) -> str:
     if tail.isalpha() and len(tail) == 1:
         return f"{head}-{tail}"
     return symbol
+
+
+def _extract_screener_symbols(payload: dict) -> tuple[str, ...]:
+    quotes = payload.get("quotes") if isinstance(payload, dict) else None
+    if not isinstance(quotes, list):
+        return ()
+    symbols: list[str] = []
+    for quote in quotes:
+        if not isinstance(quote, dict):
+            continue
+        raw_symbol = quote.get("symbol") or quote.get("ticker")
+        if not isinstance(raw_symbol, str):
+            continue
+        symbol = raw_symbol.strip().upper()
+        if not symbol or "=" in symbol or "^" in symbol:
+            continue
+        symbols.append(symbol)
+    return tuple(symbols)
 
 
 @dataclass
@@ -233,6 +273,27 @@ class SyntheticMarketDataProvider:
         peers = [self.get_stock_fundamentals(peer) for peer in peer_symbols if peer != symbol]
         return build_stock_analysis_report(symbol, fundamentals, peers, put_call_ratio=0.95)
 
+    def discover_stock_symbols(self, mode: str | None = None, limit: int = 50) -> tuple[str, ...]:
+        candidates = (
+            "ASML",
+            "TSM",
+            "NOW",
+            "PANW",
+            "QCOM",
+            "TXN",
+            "LIN",
+            "CAT",
+            "GE",
+            "RTX",
+            "SHOP",
+            "UBER",
+            "ABNB",
+            "PGR",
+            "SCHW",
+        )
+        watched = set(self.universe.allowed_stocks)
+        return tuple(symbol for symbol in candidates if symbol not in watched)[:limit]
+
 
 @dataclass
 class AlphaVantageMarketDataProvider:
@@ -252,6 +313,9 @@ class AlphaVantageMarketDataProvider:
 
     def get_stock_analysis(self, symbol: str, peer_symbols: list[str]) -> CompanyResearchReport:
         raise MarketDataError("Detailed stock analysis is not supported for alpha_vantage in this runtime.")
+
+    def discover_stock_symbols(self, mode: str | None = None, limit: int = 50) -> tuple[str, ...]:
+        raise MarketDataError("Stock discovery is only supported for yfinance in this runtime.")
 
     def get_quote(self, symbol: str) -> float:
         candles = self.get_candles(symbol, "D1", 1)
@@ -403,6 +467,7 @@ class YFinanceMarketDataProvider:
     config: MarketDataConfig
     universe: UniverseConfig
     ticker_factory: TickerFactory = _default_yfinance_ticker
+    screen_function: ScreenFunction | None = None
     cache_ttl_seconds: int = 900
     ticker_cache: dict[str, Any] = field(default_factory=dict)
     candle_cache: dict[tuple[str, str], tuple[float, list[Candle]]] = field(default_factory=dict)
@@ -479,6 +544,30 @@ class YFinanceMarketDataProvider:
             peer_fundamentals.append(peer_data)
         put_call_ratio = self._get_put_call_ratio(symbol)
         return build_stock_analysis_report(symbol, fundamentals, peer_fundamentals[:6], put_call_ratio=put_call_ratio)
+
+    def discover_stock_symbols(self, mode: str | None = None, limit: int = 50) -> tuple[str, ...]:
+        screen = self.screen_function or _default_yfinance_screen
+        screeners = DISCOVERY_SCREENER_MODES.get((mode or "default").lower(), DISCOVERY_SCREENER_MODES["default"])
+        requested = max(10, min(250, limit))
+        symbols: list[str] = []
+        seen: set[str] = set()
+        for screener in screeners:
+            try:
+                payload = screen(screener, count=requested)
+            except Exception as exc:
+                if not _is_retryable_market_data_exception(exc):
+                    raise
+                continue
+            for symbol in _extract_screener_symbols(payload):
+                if symbol in seen:
+                    continue
+                seen.add(symbol)
+                symbols.append(symbol)
+                if len(symbols) >= limit:
+                    return tuple(symbols)
+        if not symbols:
+            raise MarketDataError("No discovery candidates returned by Yahoo Finance screeners.")
+        return tuple(symbols)
 
     def get_quote(self, symbol: str) -> float:
         candles = self.get_candles(symbol, "D1", 1)

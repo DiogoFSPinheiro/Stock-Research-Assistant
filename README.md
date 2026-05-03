@@ -31,7 +31,8 @@ The runtime no longer centers on trade execution. `/top` and `/tip` now publish 
 - Generate full company research reports with valuation model breakdowns
 - Summarize intrinsic value, valuation range, analyst target, business quality, catalysts, and key risks
 - Maintain a research watchlist separately from an owned portfolio list
-- Summarize daily portfolio moves from `config/portfolio.txt`
+- Summarize daily portfolio moves, estimated daily P/L, and P/L since buy from `config/portfolio.txt`
+- Discover new stock ideas outside the current watchlist through Yahoo Finance screeners
 
 ## Command Reference
 
@@ -55,6 +56,12 @@ The runtime no longer centers on trade execution. `/top` and `/tip` now publish 
 - `/compare AAPL MSFT`
   Compare two to five companies by valuation, margin of safety, business quality, data quality, investment score, and main risk.
 
+- `/discover`
+  Find new research ideas outside your current watchlist using Yahoo Finance screeners, then show how to add them with `/watch SYMBOL`.
+
+- `/discover value 5`
+  Discovery with an optional mode and result limit. Supported modes include `value`, `growth`, `active`, and `anchors`.
+
 ### Watchlist And Portfolio
 
 - `/watch NVDA`
@@ -64,7 +71,7 @@ The runtime no longer centers on trade execution. `/top` and `/tip` now publish 
   Show the current research watchlist with stance, score, margin of safety, data quality, and main risk.
 
 - `/portfolio`
-  Show the current daily move summary for holdings in `config/portfolio.txt`.
+  Show the current daily move summary for holdings in `config/portfolio.txt`. When quantity and average cost are available, the report also includes estimated daily P/L and P/L since buy.
 
 - `/portfolio add MSFT 10 320.50`
   Add or replace a portfolio holding with symbol, quantity, and average cost.
@@ -87,6 +94,33 @@ The runtime no longer centers on trade execution. `/top` and `/tip` now publish 
 - `/help`
   Display the available commands.
 
+## Watchlist, Discovery, And Portfolio Files
+
+`config/stock_universe.txt` is the focused research universe. These are the companies the assistant ranks for `/top`, `/tip`, `/watchlist`, and scheduled research scans.
+
+`/discover` does not require a second local ticker list. It pulls candidates from Yahoo Finance screeners, removes stocks already in `config/stock_universe.txt`, analyzes the remaining names, and suggests additions with `/watch SYMBOL`.
+
+Discovery modes:
+
+- `value`: valuation-oriented screeners such as undervalued large caps and undervalued growth stocks
+- `growth`: growth and technology-oriented screeners
+- `active`: most active and recent market movers
+- `anchors`: more stable portfolio-anchor style screeners
+
+`config/portfolio.txt` stores owned positions separately from the research watchlist. It supports legacy symbol-only rows and richer position rows:
+
+```text
+ABBV,4,143.35
+AMZN,3,108.38
+MT,9,24.227
+IWDA.AS,14,70.939
+EDP.LS,141,4.5244
+FN,0.3145,524.57
+MNST,4,43.26
+```
+
+The format is `SYMBOL,quantity,average_cost`. The assistant reads this file each time `/portfolio` runs, so portfolio file changes do not require a restart.
+
 ### Compatibility Aliases
 
 These remain available:
@@ -102,6 +136,7 @@ These remain available:
 - `/add NVDA`
 - `watchlist`
 - `compare AAPL MSFT`
+- `discover value 5`
 
 ## Research Output
 
@@ -204,6 +239,7 @@ Notes:
 - `BOT_ALLOWED_STOCKS` is only used as a fallback when the watchlist file is empty or missing.
 - `BOT_PORTFOLIO_PATH` points to owned holdings and is intentionally separate from the research watchlist.
 - Portfolio rows can be either `SYMBOL` or `SYMBOL,quantity,avg_cost`; the richer form enables P/L reporting.
+- Portfolio file changes are read on the next `/portfolio` command and do not require restarting the bot.
 - `MARKET_DATA_PROVIDER=yfinance` is the default live-data path for research reports.
 - `MARKET_DATA_PROVIDER=synthetic` is useful for local dry runs and tests.
 

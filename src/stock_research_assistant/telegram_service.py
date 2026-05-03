@@ -57,6 +57,7 @@ class TelegramCommand:
     quantity: float | None = None
     average_cost: float | None = None
     threshold: float | None = None
+    mode: str | None = None
 
 
 def _default_post(url: str, payload: dict) -> None:
@@ -157,6 +158,24 @@ class TelegramApprovalService:
                 actor=update.actor,
                 text=update.text,
                 symbols=symbols,
+            )
+        if first in {"/discover", "discover"}:
+            limit = 5
+            mode = None
+            for part in parts[1:]:
+                lowered_part = part.lower()
+                if lowered_part.isdigit():
+                    limit = max(1, min(int(lowered_part), 10))
+                else:
+                    mode = lowered_part
+            return TelegramCommand(
+                update_id=update.update_id,
+                kind="discover",
+                chat_id=update.chat_id,
+                actor=update.actor,
+                text=update.text,
+                limit=limit,
+                mode=mode,
             )
         if first in {"/analise", "analise", "/analyze", "analyze", "/analyse", "analyse"}:
             if len(parts) >= 2:

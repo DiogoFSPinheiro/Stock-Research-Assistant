@@ -33,6 +33,7 @@ from .reporting import (
     render_alerts,
     render_company_report,
     render_compare,
+    render_discovery,
     render_error,
     render_no_strong_setup,
     render_portfolio_update,
@@ -326,6 +327,65 @@ class TradingBot:
             return 0
         return len(reports)
 
+    def discover_stocks(
+        self,
+        chat_id: str | int | None = None,
+        limit: int = 5,
+        mode: str | None = None,
+    ) -> int:
+        if not hasattr(self.approvals, "publish_text"):
+            return 0
+        requested_limit = max(1, min(limit, 10))
+        normalized_mode = mode.strip().lower() if mode else None
+        self.logger.info(
+            "Discovering market ideas with mode=%s limit=%s",
+            normalized_mode or "default",
+            requested_limit,
+        )
+        self.refresh_universe()
+        watched = set(self.config.universe.allowed_stocks)
+        try:
+            candidates = self.market_data.discover_stock_symbols(
+                mode=normalized_mode,
+                limit=max(25, requested_limit * 8),
+            )
+        except MarketDataError as exc:
+            self.approvals.publish_text(render_error("Discovery unavailable", exc), chat_id=chat_id)
+            return 0
+
+        reports: list[CompanyResearchReport] = []
+        analyzed_reports: list[CompanyResearchReport] = []
+        for symbol in candidates:
+            if symbol in watched:
+                continue
+            try:
+                report = self.market_data.get_stock_analysis(symbol, list(watched))
+            except MarketDataError as exc:
+                self.logger.warning("Discovery research data unavailable for %s: %s", symbol, exc)
+                continue
+            report = self._with_watchlist_status(report)
+            if report.recommendation != "SELL":
+                analyzed_reports.append(report)
+            if self._passes_research_screen(report):
+                reports.append(report)
+            if len(reports) >= requested_limit:
+                break
+        ranked = sorted(reports, key=self._research_rank, reverse=True)[:requested_limit]
+        if len(ranked) < requested_limit:
+            ranked_symbols = {report.symbol for report in ranked}
+            fallback = [
+                report
+                for report in sorted(analyzed_reports, key=self._research_rank, reverse=True)
+                if report.symbol not in ranked_symbols
+            ]
+            ranked.extend(fallback[: requested_limit - len(ranked)])
+        try:
+            self.approvals.publish_text(render_discovery(ranked, requested_limit, normalized_mode), chat_id=chat_id)
+        except TelegramApiError as exc:
+            self.logger.warning("Telegram publish failed for discovery response: %s", exc)
+            return 0
+        return len(ranked)
+
     def analyze_stock(self, symbol: str, chat_id: str | int | None = None) -> int:
         normalized_symbol = symbol.strip().strip('"').strip("'").upper()
         if not normalized_symbol:
@@ -411,7 +471,6 @@ class TradingBot:
                 [
                     f"<b>{html_escape(company_name)} - {html_escape(symbol)}</b>",
                     f"Current price: {html_escape(format_price(current_price))}",
-                    f"Previous close: {html_escape(format_price(previous_close))}",
                     f"Daily move: {html_escape(format_signed_pct(move_pct))}",
                 ]
             )
@@ -419,14 +478,12 @@ class TradingBot:
                 daily_pnl = (current_price - previous_close) * holding.quantity
                 daily_total_pnl += daily_pnl
                 has_daily_total = True
-                detail_lines.append(f"Quantity: {holding.quantity:g}")
                 detail_lines.append(f"Estimated daily P/L: {html_escape(format_signed_price(daily_pnl))}")
             if holding.quantity is not None and holding.average_cost is not None:
                 unrealized_pnl = (current_price - holding.average_cost) * holding.quantity
                 unrealized_pct = (current_price - holding.average_cost) / holding.average_cost if holding.average_cost else None
                 total_unrealized_pnl += unrealized_pnl
                 has_unrealized_total = True
-                detail_lines.append(f"Average cost: {html_escape(format_price(holding.average_cost))}")
                 detail_lines.append(
                     f"P/L since buy: {html_escape(format_signed_price(unrealized_pnl))} ({html_escape(format_signed_pct(unrealized_pct))})"
                 )
@@ -630,6 +687,10 @@ class TradingBot:
             "",
             "/compare AAPL MSFT",
             "Compare two to five companies.",
+            "",
+            "/discover or /discover value 5",
+            "Find new market ideas outside your current watchlist.",
+            "Modes: value, growth, active, anchors.",
             "",
             "<b>Portfolio</b>",
             "portfolio or /portfolio",

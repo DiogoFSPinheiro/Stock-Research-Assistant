@@ -14,6 +14,7 @@ from stock_research_assistant.app import (
     should_run_portfolio_report,
     should_run_scheduled_scan,
 )
+from stock_research_assistant.reporting import SEPARATOR
 
 
 class TerminalStopControllerTests(unittest.TestCase):
@@ -61,9 +62,7 @@ class TerminalStopControllerTests(unittest.TestCase):
             messages,
             [
                 "Top research ideas cycle started. Please wait before sending more requests.",
-                "🔎 <b>Research cycle started</b>\n"
-                "━━━━━━━━━━━━━━━━━━━━\n"
-                "\n"
+                f"🔎 <b>Research cycle started</b>\n{SEPARATOR}\n\n"
                 "Building the current top research ideas.\n"
                 "Please wait before sending more requests.",
             ],
@@ -104,9 +103,7 @@ class TerminalStopControllerTests(unittest.TestCase):
             messages,
             [
                 "PORTFOLIO daily report started. Please wait before sending more requests.",
-                "📁 <b>Portfolio report started</b>\n"
-                "━━━━━━━━━━━━━━━━━━━━\n"
-                "\n"
+                f"📁 <b>Portfolio report started</b>\n{SEPARATOR}\n\n"
                 "Building today's portfolio performance report.\n"
                 "Please wait before sending more requests.",
             ],

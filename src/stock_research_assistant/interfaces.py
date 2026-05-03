@@ -38,6 +38,9 @@ class MarketDataProvider(Protocol):
     def get_stock_analysis(self, symbol: str, peer_symbols: list[str]) -> CompanyResearchReport:
         ...
 
+    def discover_stock_symbols(self, mode: str | None = None, limit: int = 50) -> tuple[str, ...]:
+        ...
+
 
 class ApprovalService(Protocol):
     def publish_signal(self, signal: Signal, proposal: OrderProposal) -> None:
